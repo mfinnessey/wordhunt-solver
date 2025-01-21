@@ -4,8 +4,7 @@ use std::env;
 use letter::{Letter, translate_letter, translate_word};
 use trie_rs::{TrieBuilder, Trie};
 use board::Board;
-use combination_search::get_combination_score;
-
+use combination_search::{CombinationEvaluator, get_combination_score, ALL_A_FREQUENCIES, LetterCombination};
 mod board;
 mod letter;
 mod wordlist;
@@ -25,16 +24,20 @@ fn main() {
     let (trie, word_count) = create_trie(file_path);
     println!("Finished creating word trie containing {} words.", word_count);
 
+    let all_a_combination = LetterCombination::new(ALL_A_FREQUENCIES);
+
+    let combination_evaluator = CombinationEvaluator::new(&trie, all_a_combination, get_combination_score, 164000, 16);
+    combination_evaluator.check_combinations(10);
+
 
     
     // temporary test grid from https://www.youtube.com/watch?v=3cgr_GgA5ns
-    let test_board_chars = ['M', 'H', 'O', 'N', 'I', 'T', 'E', 'R', 'L', 'A', 'S', 'N', 'S', 'E', 'R', 'U'];
+/*    let test_board_chars = ['M', 'H', 'O', 'N', 'I', 'T', 'E', 'R', 'L', 'A', 'S', 'N', 'S', 'E', 'R', 'U'];
     let test_board_letters: [Letter; 16] = test_board_chars.into_iter().filter_map(|c| translate_letter(&c)).collect::<Vec<Letter>>().try_into().unwrap();
     let mut letter_counts: [u8; 26] = [0; 26];
     for letter in test_board_letters.iter() {
 	letter_counts[letter.clone() as usize] += 1;
     }
-/*    
     println!("Maximum possible score for test board letters is {}.", get_combination_score(&trie, letter_counts));
 
     let mut test_board = Board::new(test_board_letters, &trie);

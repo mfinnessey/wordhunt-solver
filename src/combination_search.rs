@@ -25,20 +25,12 @@ const ALPHABET_LENGTH: usize = 26;
 const TILE_COUNT: u8 = 16;
 
 /// the starting value of the iterator over all letter combinations
-const ALL_A_FREQUENCIES: [u8; ALPHABET_LENGTH] = [TILE_COUNT, 0, 0, 0, 0,
+pub const ALL_A_FREQUENCIES: [u8; ALPHABET_LENGTH] = [TILE_COUNT, 0, 0, 0, 0,
 						  0, 0, 0, 0, 0,
 						  0, 0, 0, 0, 0,
 						  0, 0, 0, 0, 0,
 						  0, 0, 0, 0, 0,
 						  0,];
-// TODO standardize on combination / frequencies terminology
-/// the ending value of the iterator over all letter combinations
-const ALL_Z_FREQUENCIES: [u8; ALPHABET_LENGTH] = [0, 0, 0, 0, 0,
-						  0, 0, 0, 0, 0,
-						  0, 0, 0, 0, 0,
-						  0, 0, 0, 0, 0,
-						  0, 0, 0, 0, 0,
-						  TILE_COUNT,];
 
 /// the amount of entries that must be in the global queue before the worker threads
 /// are released
@@ -48,25 +40,24 @@ const STARTUP_PUSH_COUNT: u32 = 200_000;
 const WORKER_THREAD_COUNT: u8 = 16;
 
 #[derive(Copy, Clone, Serialize, Deserialize)]
-struct LetterCombination {
+pub struct LetterCombination {
     frequencies: [u8; ALPHABET_LENGTH],
 }
 
 impl LetterCombination {
-    fn new(frequencies: [u8; ALPHABET_LENGTH]) -> Self {
+    pub fn new(frequencies: [u8; ALPHABET_LENGTH]) -> Self {
 	Self {frequencies}
     }
 }
 
-/// Ord implementation in REVERSE ORDER of generation to make BinaryHeap a min-heap
 impl Ord for LetterCombination {
     fn cmp(&self, other: &Self) -> Ordering {
 	for (freq1, freq2) in self.frequencies.iter().zip(other.frequencies.iter()) {
 	    if freq1 > freq2 {
-		return Ordering::Greater;
+		return Ordering::Less;
 	    }
 	    if freq2 > freq1 {
-		return Ordering::Less;
+		return Ordering::Greater;
 	    }
 	}
 	Ordering::Equal
@@ -106,45 +97,45 @@ impl IndexMut<usize> for LetterCombination {
 
 impl Eq for LetterCombination {}
 
-impl From<LetterCombination> for [u8; 26] {
+impl From<LetterCombination> for [u8; ALPHABET_LENGTH] {
     fn from(frequencies: LetterCombination) -> Self {
 	frequencies.frequencies
     }
 }
 
-// TODO make this more generic in terms of length and count and then write
-// some tests for this!
-/// generate the combinations of letters that will be evaluated.
-struct LetterCombinationGenerator {
-    /// we represent each combination of letters as a set of frequency counts.
-    /// (think pushing a histogram of tiles around)
-    frequencies: LetterCombination,
-    /// the leftmost index that has a non-zero count.
+impl From<[u8; ALPHABET_LENGTH]> for LetterCombination {
+    fn from(frequencies: [u8; ALPHABET_LENGTH]) -> Self {
+	LetterCombination::new(frequencies)
+    }
+}
+
+/// generates combinations with replacement for a specified C(n, r) as frequency
+/// counts for the n options. follows the rule that no combination can be generated
+/// that shifts more frequency to the earlier options.
+// this is implemented abstractly primarily for practical unit testing.
+pub struct SequentialCombinationGenerator<const N: usize> {
+    frequencies: [u8; N],
     left: usize,
-    /// the right index at which we are moving the current frequency around
     right: usize,
 }
 
-impl LetterCombinationGenerator {
-    pub fn new(initial_frequencies: LetterCombination) -> Self {
+impl<const N: usize> SequentialCombinationGenerator<N> {
+    fn new(starting_frequencies: [u8; N]) -> Self {
 	Self {
-	    frequencies: initial_frequencies,
+	    frequencies: starting_frequencies,
 	    left: 0,
 	    right: 0,
 	}
     }
-}
 
-impl Iterator for LetterCombinationGenerator {
-    type Item = LetterCombination;
-    
-    fn next(&mut self) -> Option<Self::Item> {
+    /// wrap this in derived types to implement iterator
+    fn next(&mut self) -> Option<[u8; N]> {
 	let cur = Some(self.frequencies);
-	
+
 	// end state where all tiles are as far to the right as possible
-        if self.frequencies[ALPHABET_LENGTH - 1] == TILE_COUNT {
+        if self.frequencies[N - 1] == TILE_COUNT {
 	    return None;
-	} 
+	}
 
 	// advance the iterator
 	// we can uniquely generate all combinations of letters by "pushing"
@@ -154,9 +145,9 @@ impl Iterator for LetterCombinationGenerator {
 	// 8 7 ... 1
 	// 0 0 ... 16
 	// A B ... Z
-	if self.right == ALPHABET_LENGTH - 1 {
+	if self.right == N - 1 {
 	    // put the tile one to the right of left
-	    self.frequencies[ALPHABET_LENGTH - 1] -= 1;
+	    self.frequencies[N - 1] -= 1;
 	    self.frequencies[self.left + 1] += 1;
 
 	    // advance the left barrier if necessary
@@ -173,15 +164,37 @@ impl Iterator for LetterCombinationGenerator {
 	    self.right += 1;
 	    self.frequencies[self.right] += 1;
 	}
-	
+
 	cur
     }
 }
 
+pub struct SequentialLetterCombinationGenerator {
+    generator: SequentialCombinationGenerator<ALPHABET_LENGTH>,
+}
+
+impl SequentialLetterCombinationGenerator {
+    fn new(starting_frequencies: LetterCombination) -> Self {
+	Self {
+	    generator: SequentialCombinationGenerator::new(starting_frequencies.into()),
+	}
+    }
+}
+
+impl Iterator for SequentialLetterCombinationGenerator {
+    type Item = LetterCombination;
+
+    fn next(&mut self) -> Option<Self::Item>{
+	self.generator.next().map(|frequencies| frequencies.into())
+    }
+}
+
+// TODO replace LetterCombinationGenerator with a generic for anything that is an iterator over
+// letter combinations
 /// evaluates all combinations of letters using a given wordlist using a given metric
-struct CombinationEvaluator<'a> {
+pub struct CombinationEvaluator<'a, CombinationGenerator: Iterator<Item = LetterCombination>> {
     word_list: &'a Trie<Letter>,
-    combinations: LetterCombinationGenerator,
+    combinations: CombinationGenerator,
     /// retain the score instead of simply a pass/fail bool so that we can eliminate combinations
     /// based off of lower bounds from stage 2
     metric: fn(&Trie<Letter>, LetterCombination) -> u32,
@@ -214,9 +227,9 @@ struct WorkerInformation<'a> {
     /// the number of worker threads that have stopped for a snapshot
     workers_stopped_for_snapshot: Arc<Mutex<u8>>,
     /// set by the generator thread to notify the worker threads that the snapshot has been completed
-    snapshot_complete: Arc<(Mutex<bool>, Condvar)>,
+    snapshot_complete: Arc<(Arc<Mutex<bool>>, Condvar)>,
     /// where to write snapshots
-    snapshot_directory: Arc<&'a Path>,
+    snapshot_directory: Arc<PathBuf>,
 }
 
 impl<'a> WorkerInformation<'a> {
@@ -228,7 +241,7 @@ impl<'a> WorkerInformation<'a> {
 	   all_combinations_generated: Arc<RwLock<bool>>, stop_for_snapshot: &'a AtomicBool,
 	   snapshot_number: Arc<RwLock<u64>>, generator_thread_stopped: Arc<RwLock<bool>>,
 	   queues_empty: Arc<(Mutex<bool>, Condvar)>, workers_stopped_for_snapshot: Arc<Mutex<u8>>,
-	   snapshot_complete: Arc<(Mutex<bool>, Condvar)>, snapshot_directory: Arc<&'a Path>) -> Self {
+	   snapshot_complete: Arc<(Arc<Mutex<bool>>, Condvar)>, snapshot_directory: Arc<PathBuf>) -> Self {
 	Self {
 	    word_list,
 	    metric,
@@ -237,7 +250,7 @@ impl<'a> WorkerInformation<'a> {
 	    global,
 	    stealers,
 	    pass_count_tx,
-	    all_combinations_generated,	    
+	    all_combinations_generated,
 	    stop_for_snapshot,
 	    snapshot_number,
 	    generator_thread_stopped,
@@ -250,20 +263,9 @@ impl<'a> WorkerInformation<'a> {
 }
 
 
-impl<'a> CombinationEvaluator<'a> {
-    pub fn new(word_list: &'a Trie<Letter>, starting_frequencies: LetterCombination, metric: fn(&Trie<Letter>, LetterCombination) -> u32,
-	       target: u32, num_worker_threads: usize) -> Self {
-	Self {
-	    word_list,
-	    combinations: LetterCombinationGenerator::new(starting_frequencies),
-	    metric,
-	    target,
-	    num_worker_threads,
-	}
-    }
-
-    /// spawn threads to create combination evaluation architecture
-    pub fn check_combinations(self) {
+impl<'a, Generator: Iterator<Item = LetterCombination> + std::marker::Send> CombinationEvaluator<'a, Generator> {
+        /// spawn threads to create combination evaluation architecture
+    pub fn check_combinations(self, snapshot_frequency: u64) {
 	// create snapshot directory with time-based unique identifier
 	let cur_time = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs();
 	let path_string = "snapshots-".to_string() + &cur_time.to_string();
@@ -272,7 +274,7 @@ impl<'a> CombinationEvaluator<'a> {
 	    Ok(_) => (),
 	    Err(_) => panic!("Could not create checkpoints directory"),
 	}
-	
+
 	let global_queue = Injector::new();
 
 	let mut workers: Vec<Worker<LetterCombination>> = Vec::new();
@@ -288,7 +290,7 @@ impl<'a> CombinationEvaluator<'a> {
 	}
 
 	let (pass_count_tx, pass_count_rx) = channel();
-	
+
 	let all_combinations_generated = Arc::new(RwLock::new(false));
 	let stop_for_snapshot = AtomicBool::new(false);
 	let snapshot_number: Arc<RwLock<u64>> = Arc::new(RwLock::new(0));
@@ -298,13 +300,14 @@ impl<'a> CombinationEvaluator<'a> {
 	let queues_empty_condvar = Condvar::new();
 	let queues_empty = Arc::new((queues_empty_mutex, queues_empty_condvar));
 	let workers_stopped_for_snapshot: Arc<Mutex<u8>> = Arc::new(Mutex::new(0));
-	let snapshot_complete_mutex = Mutex::new(false);
+	let snapshot_complete_mutex = Arc::new(Mutex::new(false));
 	let snapshot_complete_condvar = Condvar::new();
-	let snapshot_complete = Arc::new((snapshot_complete_mutex, snapshot_complete_condvar));
-	
+	let snapshot_complete = Arc::new((snapshot_complete_mutex.clone(), snapshot_complete_condvar));
+
 	let stealers_vec_ref = Arc::new(stealers);
 	let global_queue_ref = Arc::new(global_queue);
-	let snapshot_directory_ref = Arc::new(snapshot_directory);
+	let snapshot_directory_ref = Arc::new(snapshot_directory.to_owned());
+	let execution_completed = Arc::new(Mutex::new(false));
 
 	crossbeam_thread::scope(|s| {
 	    // spawn the generator thread
@@ -316,9 +319,9 @@ impl<'a> CombinationEvaluator<'a> {
 	    let queues_empty = &queues_empty;
 	    let snapshot_complete = &snapshot_complete;
 	    let generator_handle = s.spawn(move |_| generate_combinations(self.combinations, global_queue_ref_for_generator,
-									  Arc::clone(&all_combinations_generated), stop_for_snapshot,
-									  Arc::clone(&snapshot_number), Arc::clone(&generator_thread_stopped),
-									  Arc::clone(&queues_empty), Arc::clone(&snapshot_complete), pass_count_rx));
+									  Arc::clone(all_combinations_generated), stop_for_snapshot,
+									  Arc::clone(snapshot_number), Arc::clone(generator_thread_stopped),
+									  Arc::clone(queues_empty), Arc::clone(snapshot_complete), pass_count_rx));
 	    let mut worker_threads: Vec<ScopedJoinHandle<'_, ()>> = Vec::new();
 	    for thread_num in 0..self.num_worker_threads {
 		// using unwrap as is safe by construction - we have pushed num_worker_threads elements
@@ -326,18 +329,24 @@ impl<'a> CombinationEvaluator<'a> {
 		let stealers_ref = stealers_vec_ref.clone();
 		let global_ref = global_queue_ref.clone();
 
+		// TODO clone this struct
 		let worker_information = WorkerInformation::new(self.word_list, self.metric, self.target, thread_worker,
 								global_ref, stealers_ref, pass_count_tx.clone(),
-								Arc::clone(&all_combinations_generated),
-								&stop_for_snapshot, Arc::clone(&snapshot_number), Arc::clone(&generator_thread_stopped),
-								Arc::clone(&queues_empty), Arc::clone(&workers_stopped_for_snapshot), Arc::clone(&snapshot_complete),
-								Arc::clone(&snapshot_directory_ref));
+								Arc::clone(all_combinations_generated),
+								stop_for_snapshot, Arc::clone(snapshot_number), Arc::clone(generator_thread_stopped),
+								Arc::clone(queues_empty), Arc::clone(&workers_stopped_for_snapshot),
+								Arc::clone(snapshot_complete), Arc::clone(&snapshot_directory_ref));
 		let handle = s.builder().name(thread_num.to_string() + "thread").spawn(
 		    move |_| evaluate_combinations(worker_information)).unwrap();
 		worker_threads.push(handle);
 	    }
 
-	    // TODO spawn snapshot thread
+
+	    // spawn snapshot initiator thread
+	    let execution_completed_temp_ref = &execution_completed;
+	    let snapshot_handle = s.spawn(move |_| trigger_snapshots(stop_for_snapshot, Arc::clone(snapshot_number),
+								      Arc::clone(&snapshot_complete_mutex), Arc::clone(execution_completed_temp_ref),
+								      snapshot_frequency));
 
 	    if generator_handle.join().is_err(){
 		panic!("Generator thread paniced!")
@@ -349,44 +358,69 @@ impl<'a> CombinationEvaluator<'a> {
 		}
 	    }
 
-	    // TODO join snapshot thread
+	    // execution is complete after the last worker terminates
+	    *execution_completed.lock().unwrap() = true;
+	    if snapshot_handle.join().is_err() {
+		panic!("Snapshot thread paniced!")
+	    }
+
 	}).unwrap(); // unwrap as we would just panic anyways
+    }
+}
+
+/// implementation for raw stage 1 search
+impl<'a> CombinationEvaluator<'a, SequentialLetterCombinationGenerator> {
+    pub fn new(word_list: &'a Trie<Letter>, starting_frequencies: LetterCombination, metric: fn(&Trie<Letter>, LetterCombination) -> u32,
+	       target: u32, num_worker_threads: usize) -> Self {
+	Self {
+	    word_list,
+	    combinations: SequentialLetterCombinationGenerator::new(starting_frequencies),
+	    metric,
+	    target,
+	    num_worker_threads,
+	}
     }
 }
 
 // TODO comment out the design
 // TODO SPAWN THIS IN ITS OWN THREAD
-fn trigger_snapshots(stop_for_snapshot: &AtomicBool, snapshot_number: RwLock<u32>, snapshot_complete: Mutex<bool>,
-		     execution_completed: Mutex<bool>){
-    loop {	
-	// mark for the other threads to begin taking a snapshot
-	stop_for_snapshot.store(true, MemoryOrdering::SeqCst);
-
+fn trigger_snapshots(stop_for_snapshot: &AtomicBool, snapshot_number: Arc<RwLock<u64>>,
+		     snapshot_complete: Arc<Mutex<bool>>, execution_completed: Arc<Mutex<bool>>,
+		     snapshot_frequency_secs: u64){
+    const CHECK_FOR_COMPLETION_INTERVAL_SECS: u64 = 10;
+    let sleep_loop_count = snapshot_frequency_secs / CHECK_FOR_COMPLETION_INTERVAL_SECS;
+    loop {
 	// take checkpoints every 15 minutes, waking every 10 seconds to check if execution has
 	// completed
 	// TODO write this more cleanly
-	for _ in 0..90 {
+	for _ in 0..sleep_loop_count {
 	    if *execution_completed.lock().unwrap() {
 		return;
 	    }
-	    
-	    thread::sleep(time::Duration::from_secs(10));	    
+
+	    thread::sleep(time::Duration::from_secs(CHECK_FOR_COMPLETION_INTERVAL_SECS));
 	}
+
+	println!("Taking snapshot.");
+	// mark for the other threads to begin taking a snapshot
+	stop_for_snapshot.store(true, MemoryOrdering::SeqCst);
 
 
 	// confirm that the global thread has completed the previous snapshot
 	while !*snapshot_complete.lock().unwrap() {
 	    thread::sleep(time::Duration::from_millis(200));
 	}
-	
-	*snapshot_number.write().unwrap() += 1;		
+
+	*snapshot_number.write().unwrap() += 1;
     }
 }
 
-fn generate_combinations(combinations: LetterCombinationGenerator, queue: Arc<Injector<LetterCombination>>,
+// thread needs a lot of state passed in. not bundling into a struct as there is a singular generator
+#[allow(clippy::too_many_arguments)]
+fn generate_combinations(combinations: impl Iterator<Item = LetterCombination>, queue: Arc<Injector<LetterCombination>>,
 			 all_combinations_generated: Arc<RwLock<bool>>, stop_for_snapshot: &AtomicBool,
 			 snapshot_number: Arc<RwLock<u64>>, generator_thread_stopped: Arc<RwLock<bool>>,
-			 queues_empty: Arc<(Mutex<bool>, Condvar)>, snapshot_complete: Arc<(Mutex<bool>, Condvar)>,
+			 queues_empty: Arc<(Mutex<bool>, Condvar)>, snapshot_complete: Arc<(Arc<Mutex<bool>>, Condvar)>,
 			 pass_count_rx: Receiver<u64>) {
 
     const TOTAL_COMBINATIONS_COUNT: u64 = 103_077_446_706;
@@ -396,14 +430,14 @@ fn generate_combinations(combinations: LetterCombinationGenerator, queue: Arc<In
     let mut overall_combinations_generated_count: u64 = 0;
     let mut last_snapshot_combination_count: u64 = 0;
     let mut overall_pass_count: u64 = 0;
-    
+
     // begin by spinning up
     let mut spin_up_pushes_remaining = STARTUP_PUSH_COUNT;
     let mut spinning_up = true;
-    
+
     for combination in combinations {
 	overall_combinations_generated_count += 1;
-	
+
 	// can consider checking every x iteratons only if the atomic cas
 	// winds up being too expensive (guessing that it can be parallelized / branch
 	// predicted efficiently enough)
@@ -414,13 +448,15 @@ fn generate_combinations(combinations: LetterCombinationGenerator, queue: Arc<In
 		*generation_stopped= true;
 	    }
 
+	    println!("Generator stopped for snapshot with {} items remaining in global queue", queue.len());
+
 	    // write the next combination to disk (the snapshot consists of the results up to this
 	    // point and the next thing to be considered)
 	    let encoded_next = bincode::serialize(&combination).unwrap();
 	    let generator_snapshot_path = "checkpoints/gen".to_string() + &(*snapshot_number.read().unwrap()).to_string();
-	    // intentionally panic if the filesystem operation fails	    
+	    // intentionally panic if the filesystem operation fails
 	    fs::write(generator_snapshot_path, encoded_next).unwrap();
-	    
+
 	    // stop until we are notified that the queues have been emptied
 	    // n.b. if the generator thread were to be the last thread to stop,
 	    // (very unlikely given the amount of work that the worker threads have to do)
@@ -432,7 +468,7 @@ fn generate_combinations(combinations: LetterCombinationGenerator, queue: Arc<In
 	    while !*queues_emptied {
 		queues_emptied = condvar.wait(queues_emptied).unwrap();
 	    }
-	    
+
 	    // check that a snapshot invariant (empty queues at completion) has been satisfied
 	    if queue.len() != 0 {
 		panic!("Global queue was not empty at end of snapshot");
@@ -454,41 +490,41 @@ fn generate_combinations(combinations: LetterCombinationGenerator, queue: Arc<In
 	    }
 	    let batch_fail_count = batch_count - batch_pass_count;
 
-	    let batch_pass_rate: f64;
-	    // prevent divide by zero	    
+	    let batch_pass_rate: f64 =
+	    // prevent divide by zero
 	    if batch_count != 0 {
-		batch_pass_rate = (batch_pass_count as f64) / (batch_count as f64);
+		(batch_pass_count as f64) / (batch_count as f64)
 	    }
 	    else {
-		batch_pass_rate = 0.0;
-	    }
+		0.0
+	    };
 
 	    overall_pass_count += batch_pass_count;
 	    let overall_fail_count: u64 = overall_combinations_generated_count - overall_pass_count;
-	    let overall_pass_rate: f64;
-	    // prevent divide by zero	    
+	    let overall_pass_rate: f64 =
+	    // prevent divide by zero
 	    if overall_combinations_generated_count != 0 {
-		overall_pass_rate = (overall_pass_count as f64) / (overall_combinations_generated_count as f64);
+		(overall_pass_count as f64) / (overall_combinations_generated_count as f64)
 	    }
 	    else {
-		overall_pass_rate = 0.0;
-	    }
+		0.0
+	    };
 
 	    let remaining_combinations_count = TOTAL_COMBINATIONS_COUNT - overall_combinations_generated_count;
 	    let remaining_combinations_percentage: f64 = (remaining_combinations_count as f64) / (TOTAL_COMBINATIONS_COUNT as f64);
 
 	    let elapsed_time = SystemTime::now().duration_since(start_time);
-	    let elapsed_time_mins;
+	    let elapsed_time_mins =
 	    match elapsed_time {
-		Ok(time) => elapsed_time_mins = (time.as_secs() as f64) / 60.0,
-		Err(_) => elapsed_time_mins = 0.0,
-	    }
+		Ok(time) => (time.as_secs() as f64) / 60.0,
+		Err(_) => 0.0,
+	    };
 
 	    // ratio of remaining work to completed work applied to elapsed time
 	    let estimated_time_remaining_mins = (remaining_combinations_percentage / (1.0 - remaining_combinations_percentage))
 		* elapsed_time_mins;
 
-	    println!("*****");	    
+	    println!("*****");
 	    println!("Wrote checkpoint to disk.");
 	    println!("Batch: Total {} | Pass {} | Fail {} | Pass Rate {:.2}",
 		     batch_count, batch_pass_count, batch_fail_count, batch_pass_rate);
@@ -522,6 +558,7 @@ fn generate_combinations(combinations: LetterCombinationGenerator, queue: Arc<In
 	queue.push(combination);
     }
 
+    println!("Generated all combinations");
     *all_combinations_generated.write().unwrap() = true;
 }
 
@@ -534,7 +571,7 @@ fn evaluate_combinations(worker_information: WorkerInformation) {
     let global = worker_information.global;
     let stealers = worker_information.stealers;
     let pass_count_tx = worker_information.pass_count_tx;
-    let all_combinations_generated = worker_information.all_combinations_generated;    
+    let all_combinations_generated = worker_information.all_combinations_generated;
     let stop_for_snapshot = worker_information.stop_for_snapshot;
     let snapshot_number = worker_information.snapshot_number;
     let generator_thread_stopped = worker_information.generator_thread_stopped;
@@ -545,7 +582,7 @@ fn evaluate_combinations(worker_information: WorkerInformation) {
 
     let mut passed = Vec::new();
     let mut batch_pass_count: u64 = 0;
-    
+
     loop {
 	// modified from crossbeam::deque docs
 	// pop a task from the local queue, if not empty.
@@ -562,7 +599,7 @@ fn evaluate_combinations(worker_information: WorkerInformation) {
             // extract the stolen task, if there is one.
 		.and_then(|s| s.success())
 	});
-	
+
 
 	match combination {
 	    // process the combination
@@ -581,19 +618,20 @@ fn evaluate_combinations(worker_information: WorkerInformation) {
 		}
 		// write a snapshot
 		if stop_for_snapshot.load(MemoryOrdering::SeqCst) {
-		    let mut ready_to_write_snapshot = false;		    
+		    let mut ready_to_write_snapshot = false;
 		    {
 			let mut stopped_worker_count = workers_stopped_for_snapshot.lock().unwrap();
 			// this is the last worker thread stopping - verify that the generator has already stopped
 			if *stopped_worker_count == WORKER_THREAD_COUNT - 1  {
 			    let generator_stopped = generator_thread_stopped.read().unwrap();
 			    if *generator_stopped {
-				pass_count_tx.send(batch_pass_count);				
-				
+				// ignore failures on writing statistics - not important to correctness
+				let _ = pass_count_tx.send(batch_pass_count);
+
 				// notify the generator thread that all queues have been empty
 				let mut queues_empty_predicate = queues_empty.0.lock().unwrap();
 				*queues_empty_predicate = true;
-				let ref queues_empty_cvar = queues_empty.1;
+				let queues_empty_cvar = &queues_empty.1;
 				queues_empty_cvar.notify_all();
 				ready_to_write_snapshot = true;
 
@@ -606,7 +644,8 @@ fn evaluate_combinations(worker_information: WorkerInformation) {
 			// not the last worker thread stopping, so can freely stop and write snapshot
 			else {
 			    *stopped_worker_count += 1;
-			    pass_count_tx.send(batch_pass_count);
+			    // ignore failures on writing statistics - not important to correctness
+			    let _ = pass_count_tx.send(batch_pass_count);
 			    ready_to_write_snapshot = true;
 			}
 
@@ -620,7 +659,7 @@ fn evaluate_combinations(worker_information: WorkerInformation) {
 
 			// block until the global thread has completed the snapshot
 			let mut snapshot_complete_predicate = snapshot_complete.0.lock().unwrap();
-			let ref snapshot_complete_condvar = snapshot_complete.1;
+			let snapshot_complete_condvar = &snapshot_complete.1;
 			while !*snapshot_complete_predicate {
 			    snapshot_complete_predicate = snapshot_complete_condvar.wait(snapshot_complete_predicate).unwrap();
 			}
@@ -641,22 +680,20 @@ fn evaluate_combinations(worker_information: WorkerInformation) {
 /// write a snapshot from a worker thread. consists of the passed combinations along with their scores.
 fn write_worker_snapshot(passing_combinations: &Vec<(LetterCombination, u32)>,
 			 snapshot_number: Option<u64>, thread_name: &str,
-			 snapshot_directory: &Arc<&Path>){
+			 snapshot_directory: &Arc<PathBuf>){
     let encoded_passing = bincode::serialize(passing_combinations).unwrap();
-    let snapshot_id: String;
-
-    if snapshot_number.is_some(){
-	snapshot_id = snapshot_number.unwrap().to_string();
+    let snapshot_id: String = if let Some(num) = snapshot_number {
+	num.to_string()
     }
     else {
-	snapshot_id = "FINAL".to_string();
-    }
+	"FINAL".to_string()
+    };
 
     let snapshot_name = thread_name.to_owned() + &snapshot_id;
     let mut worker_snapshot_path = snapshot_directory.to_path_buf();
     worker_snapshot_path.push(snapshot_name);
-    
-    // intentionally panic if the filesystem operation fails	    
+
+    // intentionally panic if the filesystem operation fails
     fs::write(worker_snapshot_path, encoded_passing).unwrap();
 }
 
@@ -673,7 +710,7 @@ pub fn get_combination_score(dictionary: &Trie<Letter>, letter_frequencies: Lett
     let mut queue = VecDeque::new();
     // convert into slice for iteration
     let letter_counts: [u8; ALPHABET_LENGTH] = letter_frequencies.into();
-    
+
     // build inc search starting from each available letter
     for (i, count) in letter_counts.iter().enumerate() {
 	if *count > 0 {
@@ -706,7 +743,7 @@ pub fn get_combination_score(dictionary: &Trie<Letter>, letter_frequencies: Lett
 			    // TODO verify -3 indexing still appropriate
 			    score += POINTS[new_search.prefix_len() - 3];
 			}
-			
+
 			let mut new_counts = remaining_counts;
 			new_counts[i] -= 1;
 			queue.push_back((new_search, new_counts));
@@ -719,4 +756,12 @@ pub fn get_combination_score(dictionary: &Trie<Letter>, letter_frequencies: Lett
     }
 
     score
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_sequential_combination_generator(){}
 }

@@ -6,3 +6,8 @@
 
 wordlist*
 
+# convenience scripts
+*.sh
+
+# progress snapshots
+snapshots*
