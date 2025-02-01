@@ -22,15 +22,15 @@ use crossbeam::thread::ScopedJoinHandle;
 const PULL_LIMIT: usize = 10_000;
 
 const ALPHABET_LENGTH: usize = 26;
-const TILE_COUNT: u8 = 16;
+const TILE_COUNT: usize = 16;
 
 /// the starting value of the iterator over all letter combinations
-pub const ALL_A_FREQUENCIES: [u8; ALPHABET_LENGTH] = [TILE_COUNT, 0, 0, 0, 0,
-						  0, 0, 0, 0, 0,
-						  0, 0, 0, 0, 0,
-						  0, 0, 0, 0, 0,
-						  0, 0, 0, 0, 0,
-						  0,];
+pub const ALL_A_FREQUENCIES: [u8; ALPHABET_LENGTH] = [TILE_COUNT as u8, 0, 0, 0, 0,
+						      0, 0, 0, 0, 0,
+						      0, 0, 0, 0, 0,
+						      0, 0, 0, 0, 0,
+						      0, 0, 0, 0, 0,
+						      0,];
 
 /// the amount of entries that must be in the global queue before the worker threads
 /// are released
@@ -46,6 +46,12 @@ pub struct LetterCombination {
 
 impl LetterCombination {
     pub fn new(frequencies: [u8; ALPHABET_LENGTH]) -> Self {
+	let combination_tile_count: usize = frequencies.iter().map(|x| *x as usize).sum();
+	if combination_tile_count!= TILE_COUNT {
+	    panic!("Attempted to create invalid letter combination with {} tiles instead of {} tiles",
+		   combination_tile_count, TILE_COUNT);
+	}
+
 	Self {frequencies}
     }
 }
@@ -109,76 +115,103 @@ impl From<[u8; ALPHABET_LENGTH]> for LetterCombination {
     }
 }
 
-/// generates combinations with replacement for a specified C(n, r) as frequency
-/// counts for the n options. follows the rule that no combination can be generated
-/// that shifts more frequency to the earlier options.
-// this is implemented abstractly primarily for practical unit testing.
-pub struct SequentialCombinationGenerator<const N: usize> {
-    frequencies: [u8; N],
-    left: usize,
-    right: usize,
+/// generates combinations with replacement for a specified C(N, R) as frequency
+/// counts for the N options.
+/// N is the number of elements to select from
+/// R is the number of selections to make.
+// this is implemented abstractly here primarily for practical unit testing.
+// substantial inspiration taken from https://github.com/olivercalder/combinatorial/
+pub struct SequentialCombinationGenerator<const N: usize, const R: usize> {
+    /// indices into a (conceptual) array consisting of the elements that we select from
+    element_indices: [usize; R],
+    /// set iff all combinations (with replacement) have been iterated over
+    completed: bool,
 }
 
-impl<const N: usize> SequentialCombinationGenerator<N> {
-    fn new(starting_frequencies: [u8; N]) -> Self {
+impl<const N: usize, const R: usize> SequentialCombinationGenerator<N, R> {
+    pub fn new(indices: [usize; R]) -> Self {
+	// verify that indices array is non-decreasing.
+	for i in 1..R {
+	    if indices[i] < indices[i - 1] {
+		panic!("Attempted to create sequential combination generator with decreasing element_indices array. Indices {} and {} are [{}, {}].",
+		i - 1, i, indices[i - 1], indices[i]);
+	    }
+	}
 	Self {
-	    frequencies: starting_frequencies,
-	    left: 0,
-	    right: 0,
+	    element_indices: indices,
+	    completed: false,
 	}
     }
 
-    /// wrap this in derived types to implement iterator
-    fn next(&mut self) -> Option<[u8; N]> {
-	let cur = Some(self.frequencies);
+    /// create the next set of indices from the current set of indices
+    fn advance_indices(&mut self) {
+	// iteration scheme generates all non-decreasing indices arrays
+	for i in (0..R).rev() {
+	    // look for the first index that is not maxed out
+	    if self.element_indices[i] < N - 1 {
+		// bump all subsequent indices to the value of the first non-maxed index plus one
+		let next_index = self.element_indices[i] + 1;
+		for j in i..R {
+		    self.element_indices[j] = next_index;
+		}
+		return;
+	    }
+	}
 
-	// end state where all tiles are as far to the right as possible
-        if self.frequencies[N - 1] == TILE_COUNT {
+	self.completed = true;
+    }
+}
+
+impl<const N: usize, const R: usize> Iterator for SequentialCombinationGenerator<N, R> {
+    type Item = [u8; N];
+
+    fn next(&mut self) -> Option<Self::Item> {
+	if self.completed {
 	    return None;
 	}
 
-	// advance the iterator
-	// we can uniquely generate all combinations of letters by "pushing"
-	// the frequencies from 'A' to 'Z' one by one.
-	// e.g. roughly
-	// 16 0 ... 0
-	// 8 7 ... 1
-	// 0 0 ... 16
-	// A B ... Z
-	if self.right == N - 1 {
-	    // put the tile one to the right of left
-	    self.frequencies[N - 1] -= 1;
-	    self.frequencies[self.left + 1] += 1;
-
-	    // advance the left barrier if necessary
-	    if self.frequencies[self.left] == 0 {
-		self.left += 1;
-	    }
-
-	    // start moving from the left barrier again
-	    self.right = self.left;
-	}
-	// push the current tile to the right
-	else {
-	    self.frequencies[self.right] -= 1;
-	    self.right += 1;
-	    self.frequencies[self.right] += 1;
+	// map indices into (conceptual) array of elements to the frequency
+	// counts of those elements
+	let mut frequencies = [0u8; N];
+	for index  in self.element_indices {
+	    frequencies[index] += 1;
 	}
 
-	cur
+	self.advance_indices();
+
+	Some(frequencies)
     }
 }
 
+/// generates combinations of letters from the given starting_Frequencies "onwards" in sequence.
+/// the sequence is defined using the iteration scheme of SequentialCombinationGenerator above.
 pub struct SequentialLetterCombinationGenerator {
-    generator: SequentialCombinationGenerator<ALPHABET_LENGTH>,
+    generator: SequentialCombinationGenerator<ALPHABET_LENGTH, TILE_COUNT>,
 }
+
 
 impl SequentialLetterCombinationGenerator {
     fn new(starting_frequencies: LetterCombination) -> Self {
+	let indices = letter_combination_to_element_indices(starting_frequencies);
 	Self {
-	    generator: SequentialCombinationGenerator::new(starting_frequencies.into()),
+	    generator: SequentialCombinationGenerator::new(indices),
 	}
     }
+}
+
+/// map letter frequencies into indices into an (conceptual) array of the letters
+fn letter_combination_to_element_indices(lc: LetterCombination) -> [usize; TILE_COUNT] {
+
+    let mut indices = [0usize; TILE_COUNT];
+    let mut indices_idx = 0;
+    for (letter_idx, mut letter_frequency) in <[u8; ALPHABET_LENGTH]>::from(lc).into_iter().enumerate() {
+	while letter_frequency > 0 {
+	    indices[indices_idx] = letter_idx;
+	    indices_idx += 1;
+	    letter_frequency -= 1;
+	}
+    }
+    indices
 }
 
 impl Iterator for SequentialLetterCombinationGenerator {
@@ -761,7 +794,45 @@ pub fn get_combination_score(dictionary: &Trie<Letter>, letter_frequencies: Lett
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::HashSet;
 
     #[test]
-    fn test_sequential_combination_generator(){}
+    fn test_sequential_combination_generator(){
+	// test with 5 choose 3 without loss of generality
+	let initial_frequencies = [0, 0, 0];
+	let generator: SequentialCombinationGenerator<5, 3> = SequentialCombinationGenerator::new(initial_frequencies);
+
+	const EXPECTED_FREQUENCIES: [[u8; 5]; 35] = [[3, 0, 0, 0, 0], [2, 1, 0, 0, 0], [2, 0, 1, 0, 0], [2, 0, 0, 1, 0], [2, 0, 0, 0, 1],
+						     [1, 2, 0, 0, 0], [1, 1, 1, 0, 0], [1, 1, 0, 1, 0], [1, 1, 0, 0, 1], [1, 0, 2, 0, 0],
+						     [1, 0, 1, 1, 0], [1, 0, 1, 0, 1], [1, 0, 0, 2, 0], [1, 0, 0, 1, 1], [1, 0, 0, 0, 2],
+						     [0, 3, 0, 0, 0], [0, 2, 1, 0, 0], [0, 2, 0, 1, 0], [0, 2, 0, 0, 1], [0, 1, 2, 0, 0],
+						     [0, 1, 1, 1, 0], [0, 1, 1, 0, 1], [0, 1, 0, 2, 0], [0, 1, 0, 1, 1], [0, 1, 0, 0, 2],
+						     [0, 0, 3, 0, 0], [0, 0, 2, 1, 0], [0, 0, 2, 0, 1], [0, 0, 1, 2, 0], [0, 0, 1, 0, 2],
+						     [0, 0, 1, 1, 1], [0, 0, 0, 3, 0], [0, 0, 0, 2, 1], [0, 0, 0, 1, 2], [0, 0, 0, 0, 3]
+	];
+
+	let expected = HashSet::from(EXPECTED_FREQUENCIES);
+	let actual: Vec<[u8; 5]> = generator.collect();
+
+	// verify generation length and elements (generation order doesn't matter)
+	assert_eq!(actual.len(), 35);
+	assert_eq!(expected.symmetric_difference(&HashSet::from_iter(actual.into_iter())).count(), 0);
+    }
+
+    #[test]
+    fn test_letter_combination_to_element_indices(){
+	// test using AAAABBBBCCCCEEZZ
+	let frequencies: [u8; ALPHABET_LENGTH] = [4, 4, 4, 0, 2, 0,
+						  0, 0, 0, 0, 0, 0,
+						  0, 0, 0, 0, 0, 0,
+						  0, 0, 0, 0, 0, 0,
+						  0, 2,
+	];
+
+	let lc = LetterCombination::new(frequencies);
+
+	let expected: [usize; TILE_COUNT] = [0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2, 4, 4, 25, 25];
+	let actual = letter_combination_to_element_indices(lc);
+	assert_eq!(actual, expected);
+    }
 }

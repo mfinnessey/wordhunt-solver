@@ -160,11 +160,3 @@ fn get_xy(position: &u8) -> (u8, u8){
 fn get_position(x: &u8, y: &u8) -> u8 {
     (y * 4) + x
 }
-
-#[cfg(test)]
-mod board_tests {
-    #[test]
-    fn max_score_test(){
-	assert_eq!(0, 0)
-    }
-}
