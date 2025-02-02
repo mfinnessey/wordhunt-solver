@@ -7,7 +7,6 @@ use board::Board;
 use combination_search::{CombinationEvaluator, get_combination_score, ALL_A_FREQUENCIES, LetterCombination};
 mod board;
 mod letter;
-mod wordlist;
 mod utilities;
 mod combination_search;
 
