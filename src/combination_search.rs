@@ -20,6 +20,9 @@ use crossbeam::thread::ScopedJoinHandle;
 // TODO benchmark this if need be
 /// the maximum batch size that a worker thread will pull from the global queue at once
 const PULL_LIMIT: usize = 10_000;
+/// the (approximate) maximum number of elements in the global queue before the generator
+/// threaed will sleep
+const MAX_TARGET_GLOBAL_QUEUE_LEN: usize = 2 * (WORKER_THREAD_COUNT as usize) * PULL_LIMIT;
 
 const ALPHABET_LENGTH: usize = 26;
 const TILE_COUNT: usize = 16;
@@ -357,6 +360,10 @@ impl<'a, Generator: Iterator<Item = LetterCombination> + std::marker::Send> Comb
 									  Arc::clone(snapshot_number), Arc::clone(generator_thread_stopped),
 									  Arc::clone(queues_empty), Arc::clone(snapshot_complete), pass_count_rx,
 									  Arc::clone(snapshots_directory_ref)));
+
+	    // give the generator thread time to generate some combinations to avoid the worker
+	    // threads just thrashing on context switches to start
+	    thread::sleep(time::Duration::from_secs(1));
 	    let mut worker_threads: Vec<ScopedJoinHandle<'_, ()>> = Vec::new();
 	    for thread_num in 0..self.num_worker_threads {
 		// using unwrap as is safe by construction - we have pushed num_worker_threads elements
@@ -438,10 +445,12 @@ fn trigger_snapshots(stop_for_snapshot: &AtomicBool, snapshot_number: Arc<RwLock
 
 	println!("Taking snapshot.");
 	// mark for the other threads to begin taking a snapshot
+	*snapshot_complete.lock().unwrap() = false;
 	stop_for_snapshot.store(true, MemoryOrdering::SeqCst);
 
 
-	// confirm that the global thread has completed the previous snapshot
+	// confirm that the global thread has completed the previous snapshot before
+	// triggering another snapshot
 	while !*snapshot_complete.lock().unwrap() {
 	    thread::sleep(time::Duration::from_millis(200));
 	}
@@ -466,17 +475,37 @@ fn generate_combinations(combinations: impl Iterator<Item = LetterCombination>, 
     let mut last_snapshot_combination_count: u64 = 0;
     let mut overall_pass_count: u64 = 0;
 
-    // begin by spinning up
-    let mut spin_up_pushes_remaining = STARTUP_PUSH_COUNT;
-    let mut spinning_up = true;
+    // not spinning up to start
+    let mut spinning_up = false;
+    let mut spin_up_pushes_remaining = 0;
+
 
     for combination in combinations {
 	overall_combinations_generated_count += 1;
 
+	// block the generator thread if the queue is ludicrously big.
+	let mut stopped = false;
+	while overall_combinations_generated_count % (MAX_TARGET_GLOBAL_QUEUE_LEN as u64) == 0 && queue.len() >= MAX_TARGET_GLOBAL_QUEUE_LEN {
+	    if !stopped {
+		println!("Generator ran ahead, sleeping for now.");
+		stopped = true;
+	    }
+
+	    // jump out of here to take the snapshot if need be
+	    if stop_for_snapshot.load(MemoryOrdering::SeqCst) {
+		break;
+	    }
+	    thread::sleep(time::Duration::from_secs(1));
+	}
+
+	if stopped {
+	    println!("Generator thread resuming after running ahead.");
+	}
+
 	// can consider checking every x iteratons only if the atomic cas
 	// winds up being too expensive (guessing that it can be parallelized / branch
 	// predicted efficiently enough)
-	if stop_for_snapshot.load(MemoryOrdering::SeqCst) {
+	if !spinning_up && stop_for_snapshot.load(MemoryOrdering::SeqCst) {
 	    // notify worker threads that we have stopped generating new combinations
 	    {
 		let mut generation_stopped = generator_thread_stopped.write().unwrap();
@@ -508,9 +537,16 @@ fn generate_combinations(combinations: impl Iterator<Item = LetterCombination>, 
 		queues_emptied = condvar.wait(queues_emptied).unwrap();
 	    }
 
+	    // reset queues emptied for next snapshot
+	    *queues_emptied = false;
+
+
 	    // check that a snapshot invariant (empty queues at completion) has been satisfied
 	    if queue.len() != 0 {
-		panic!("Global queue was not empty at end of snapshot");
+		panic!("Global queue was not empty ({} combination(s)) at end of snapshot", queue.len());
+	    }
+	    else {
+		println!("Invariant satisfied.");
 	    }
 
 	    // defer on marking snapshot as complete to prevent another snapshot from being
@@ -550,18 +586,18 @@ fn generate_combinations(combinations: impl Iterator<Item = LetterCombination>, 
 	    };
 
 	    let remaining_combinations_count = TOTAL_COMBINATIONS_COUNT - overall_combinations_generated_count;
-	    let remaining_combinations_percentage: f64 = (remaining_combinations_count as f64) / (TOTAL_COMBINATIONS_COUNT as f64);
+	    let remaining_combinations_percentage: f64 = 100.0 * (1.0 - (remaining_combinations_count as f64) / (TOTAL_COMBINATIONS_COUNT as f64));
 
 	    let elapsed_time = SystemTime::now().duration_since(start_time);
-	    let elapsed_time_mins =
+	    let elapsed_time_hours =
 	    match elapsed_time {
-		Ok(time) => (time.as_secs() as f64) / 60.0,
+		Ok(time) => (time.as_secs_f64()) / 3600.0,
 		Err(_) => 0.0,
 	    };
 
 	    // ratio of remaining work to completed work applied to elapsed time
-	    let estimated_time_remaining_mins = (remaining_combinations_percentage / (1.0 - remaining_combinations_percentage))
-		* elapsed_time_mins;
+	    let hours_per_combination = elapsed_time_hours / (overall_combinations_generated_count as f64);
+	    let estimated_time_remaining_hours = (hours_per_combination * TOTAL_COMBINATIONS_COUNT as f64) - elapsed_time_hours;
 
 	    println!("*****");
 	    println!("Wrote snapshot to disk.");
@@ -571,8 +607,9 @@ fn generate_combinations(combinations: impl Iterator<Item = LetterCombination>, 
 		     overall_combinations_generated_count, overall_pass_count, overall_fail_count, overall_pass_rate);
 	    println!("Remaining: {} ({:.2}%) of Total {})",
 		     remaining_combinations_count, remaining_combinations_percentage, TOTAL_COMBINATIONS_COUNT);
-	    println!("Ran for {:.1} minutes. Estimate {:.1} minutes remaining",
-		     elapsed_time_mins, estimated_time_remaining_mins);
+	    println!("Ran for {:.1} hours. Estimate {:.1} hours remaining",
+		     elapsed_time_hours, estimated_time_remaining_hours);
+	    println!("Next combination is: {:?}.", <[u8; ALPHABET_LENGTH]>::from(combination));
 	    println!("*****");
 
 	    last_snapshot_combination_count = overall_combinations_generated_count;
@@ -586,11 +623,14 @@ fn generate_combinations(combinations: impl Iterator<Item = LetterCombination>, 
 	    spin_up_pushes_remaining -= 1;
 	    if spin_up_pushes_remaining == 0 {
 		spinning_up = false;
+
 		// mark that the snapshot has been completed
-		stop_for_snapshot.store(false, MemoryOrdering::SeqCst);
-		// AND RELEASE THE HOUNDS
-		*snapshot_complete.0.lock().unwrap() = true;
-		snapshot_complete.1.notify_all();
+		if stop_for_snapshot.load(MemoryOrdering::SeqCst) {
+		    stop_for_snapshot.store(false, MemoryOrdering::SeqCst);
+		    // AND RELEASE THE HOUNDS
+		    *snapshot_complete.0.lock().unwrap() = true;
+		    snapshot_complete.1.notify_all();
+		}
 	    }
 	}
 
