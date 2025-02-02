@@ -90,7 +90,6 @@ After further consideration, I think that a good compromise for this would using
 We begin by iterating over the approximately 103 billion tile combinations. Assuming 4 bytes per score upper bound (a reasonable assumption given that a maximum-length 16-tile word would, after dividing out the factor of 100, contribute 49 points), storing the results of this computation in sequential order would take over 412 GB of space. Let's get even more aggressive with our lower / upper-bounding approach. What if I took a verifiable, real-world maximum score from a board and used that as a lower bound for letter combinations that I will store. 
 
 **TODO** Determine maximuim possible score based on iteration paths in BFS over board in order to determine binary encoding scheme here.
-- Do I need binary encoding?
 **TODO** Benchmark solve time for a given combination of letters to determine if this is worth making a distributed systems problem.
 **TODO** Determine how to avoid generating boards that are identical to each other (either permutations that are the same or transformationally identical).
 - Bit manipulation?
