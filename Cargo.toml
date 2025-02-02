@@ -3,6 +3,13 @@ name = "wordhunt-solver"
 version = "0.1.0"
 edition = "2021"
 
+[profile.release]
+codegen-units = 1
+lto = "fat"
+
+[build]
+rustflags = ["-C", "target-cpu=native"]
+
 [dependencies]
 bincode = "1.3.3"
 crossbeam = "0.8.4"
