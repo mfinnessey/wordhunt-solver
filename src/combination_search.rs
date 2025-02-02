@@ -262,7 +262,7 @@ struct WorkerInformation<'a> {
     /// set by the generator thread to notify the worker threads that the snapshot has been completed
     snapshot_complete: Arc<(Arc<Mutex<bool>>, Condvar)>,
     /// where to write snapshots
-    snapshot_directory: Arc<PathBuf>,
+    snapshots_directory: Arc<PathBuf>,
 }
 
 impl<'a> WorkerInformation<'a> {
@@ -274,7 +274,7 @@ impl<'a> WorkerInformation<'a> {
 	   all_combinations_generated: Arc<RwLock<bool>>, stop_for_snapshot: &'a AtomicBool,
 	   snapshot_number: Arc<RwLock<u64>>, generator_thread_stopped: Arc<RwLock<bool>>,
 	   queues_empty: Arc<(Mutex<bool>, Condvar)>, workers_stopped_for_snapshot: Arc<Mutex<u8>>,
-	   snapshot_complete: Arc<(Arc<Mutex<bool>>, Condvar)>, snapshot_directory: Arc<PathBuf>) -> Self {
+	   snapshot_complete: Arc<(Arc<Mutex<bool>>, Condvar)>, snapshots_directory: Arc<PathBuf>) -> Self {
 	Self {
 	    word_list,
 	    metric,
@@ -290,7 +290,7 @@ impl<'a> WorkerInformation<'a> {
 	    queues_empty,
 	    workers_stopped_for_snapshot,
 	    snapshot_complete,
-	    snapshot_directory,
+	    snapshots_directory,
 	}
     }
 }
@@ -299,13 +299,13 @@ impl<'a> WorkerInformation<'a> {
 impl<'a, Generator: Iterator<Item = LetterCombination> + std::marker::Send> CombinationEvaluator<'a, Generator> {
         /// spawn threads to create combination evaluation architecture
     pub fn check_combinations(self, snapshot_frequency: u64) {
-	// create snapshot directory with time-based unique identifier
+	// create snapshots directory with time-based unique identifier
 	let cur_time = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs();
 	let path_string = "snapshots-".to_string() + &cur_time.to_string();
-	let snapshot_directory = Path::new(&path_string);
-	match fs::create_dir(snapshot_directory) {
+	let snapshots_directory = Path::new(&path_string);
+	match fs::create_dir(snapshots_directory) {
 	    Ok(_) => (),
-	    Err(_) => panic!("Could not create checkpoints directory"),
+	    Err(_) => panic!("Could not create snapshots directory"),
 	}
 
 	let global_queue = Injector::new();
@@ -339,7 +339,7 @@ impl<'a, Generator: Iterator<Item = LetterCombination> + std::marker::Send> Comb
 
 	let stealers_vec_ref = Arc::new(stealers);
 	let global_queue_ref = Arc::new(global_queue);
-	let snapshot_directory_ref = Arc::new(snapshot_directory.to_owned());
+	let snapshots_directory_ref = Arc::new(snapshots_directory.to_owned());
 	let execution_completed = Arc::new(Mutex::new(false));
 
 	crossbeam_thread::scope(|s| {
@@ -351,10 +351,12 @@ impl<'a, Generator: Iterator<Item = LetterCombination> + std::marker::Send> Comb
 	    let generator_thread_stopped = &generator_thread_stopped;
 	    let queues_empty = &queues_empty;
 	    let snapshot_complete = &snapshot_complete;
+	    let snapshots_directory_ref = &snapshots_directory_ref;
 	    let generator_handle = s.spawn(move |_| generate_combinations(self.combinations, global_queue_ref_for_generator,
 									  Arc::clone(all_combinations_generated), stop_for_snapshot,
 									  Arc::clone(snapshot_number), Arc::clone(generator_thread_stopped),
-									  Arc::clone(queues_empty), Arc::clone(snapshot_complete), pass_count_rx));
+									  Arc::clone(queues_empty), Arc::clone(snapshot_complete), pass_count_rx,
+									  Arc::clone(snapshots_directory_ref)));
 	    let mut worker_threads: Vec<ScopedJoinHandle<'_, ()>> = Vec::new();
 	    for thread_num in 0..self.num_worker_threads {
 		// using unwrap as is safe by construction - we have pushed num_worker_threads elements
@@ -368,7 +370,7 @@ impl<'a, Generator: Iterator<Item = LetterCombination> + std::marker::Send> Comb
 								Arc::clone(all_combinations_generated),
 								stop_for_snapshot, Arc::clone(snapshot_number), Arc::clone(generator_thread_stopped),
 								Arc::clone(queues_empty), Arc::clone(&workers_stopped_for_snapshot),
-								Arc::clone(snapshot_complete), Arc::clone(&snapshot_directory_ref));
+								Arc::clone(snapshot_complete), Arc::clone(snapshots_directory_ref));
 		let handle = s.builder().name(thread_num.to_string() + "thread").spawn(
 		    move |_| evaluate_combinations(worker_information)).unwrap();
 		worker_threads.push(handle);
@@ -423,7 +425,7 @@ fn trigger_snapshots(stop_for_snapshot: &AtomicBool, snapshot_number: Arc<RwLock
     const CHECK_FOR_COMPLETION_INTERVAL_SECS: u64 = 10;
     let sleep_loop_count = snapshot_frequency_secs / CHECK_FOR_COMPLETION_INTERVAL_SECS;
     loop {
-	// take checkpoints every 15 minutes, waking every 10 seconds to check if execution has
+	// take snapshots every 15 minutes, waking every 10 seconds to check if execution has
 	// completed
 	// TODO write this more cleanly
 	for _ in 0..sleep_loop_count {
@@ -448,13 +450,13 @@ fn trigger_snapshots(stop_for_snapshot: &AtomicBool, snapshot_number: Arc<RwLock
     }
 }
 
-// thread needs a lot of state passed in. not bundling into a struct as there is a singular generator
+// thread needs a lot of state passed in. not bundling into a struct as there is a singular generator thread
 #[allow(clippy::too_many_arguments)]
 fn generate_combinations(combinations: impl Iterator<Item = LetterCombination>, queue: Arc<Injector<LetterCombination>>,
 			 all_combinations_generated: Arc<RwLock<bool>>, stop_for_snapshot: &AtomicBool,
 			 snapshot_number: Arc<RwLock<u64>>, generator_thread_stopped: Arc<RwLock<bool>>,
 			 queues_empty: Arc<(Mutex<bool>, Condvar)>, snapshot_complete: Arc<(Arc<Mutex<bool>>, Condvar)>,
-			 pass_count_rx: Receiver<u64>) {
+			 pass_count_rx: Receiver<u64>, snapshots_directory: Arc<PathBuf>) {
 
     const TOTAL_COMBINATIONS_COUNT: u64 = 103_077_446_706;
 
@@ -486,7 +488,11 @@ fn generate_combinations(combinations: impl Iterator<Item = LetterCombination>, 
 	    // write the next combination to disk (the snapshot consists of the results up to this
 	    // point and the next thing to be considered)
 	    let encoded_next = bincode::serialize(&combination).unwrap();
-	    let generator_snapshot_path = "checkpoints/gen".to_string() + &(*snapshot_number.read().unwrap()).to_string();
+
+	    let snapshot_name = "gen".to_owned() + &(*snapshot_number.read().unwrap()).to_string();
+	    let mut generator_snapshot_path = snapshots_directory.to_path_buf();
+	    generator_snapshot_path.push(snapshot_name);
+
 	    // intentionally panic if the filesystem operation fails
 	    fs::write(generator_snapshot_path, encoded_next).unwrap();
 
@@ -558,7 +564,7 @@ fn generate_combinations(combinations: impl Iterator<Item = LetterCombination>, 
 		* elapsed_time_mins;
 
 	    println!("*****");
-	    println!("Wrote checkpoint to disk.");
+	    println!("Wrote snapshot to disk.");
 	    println!("Batch: Total {} | Pass {} | Fail {} | Pass Rate {:.2}",
 		     batch_count, batch_pass_count, batch_fail_count, batch_pass_rate);
 	    println!("Overall: Total {} | Pass {} | Fail {} | Pass Rate {:.2}",
@@ -611,7 +617,7 @@ fn evaluate_combinations(worker_information: WorkerInformation) {
     let queues_empty = worker_information.queues_empty;
     let workers_stopped_for_snapshot = worker_information.workers_stopped_for_snapshot;
     let snapshot_complete = worker_information.snapshot_complete;
-    let snapshot_directory = worker_information.snapshot_directory;
+    let snapshots_directory = worker_information.snapshots_directory;
 
     let mut passed = Vec::new();
     let mut batch_pass_count: u64 = 0;
@@ -646,7 +652,7 @@ fn evaluate_combinations(worker_information: WorkerInformation) {
 	    None => {
 		// write the final snapshot (final results) to disk
 		if *all_combinations_generated.read().unwrap() {
-		    write_worker_snapshot(&passed, None, thread::current().name().unwrap(), &snapshot_directory);
+		    write_worker_snapshot(&passed, None, thread::current().name().unwrap(), &snapshots_directory);
 		    return;
 		}
 		// write a snapshot
@@ -688,7 +694,7 @@ fn evaluate_combinations(worker_information: WorkerInformation) {
 		    if ready_to_write_snapshot {
 			batch_pass_count = 0;
 			write_worker_snapshot(&passed, Some(*snapshot_number.read().unwrap()), thread::current().name().unwrap(),
-					      &snapshot_directory);
+					      &snapshots_directory);
 
 			// block until the global thread has completed the snapshot
 			let mut snapshot_complete_predicate = snapshot_complete.0.lock().unwrap();
@@ -713,7 +719,7 @@ fn evaluate_combinations(worker_information: WorkerInformation) {
 /// write a snapshot from a worker thread. consists of the passed combinations along with their scores.
 fn write_worker_snapshot(passing_combinations: &Vec<(LetterCombination, u32)>,
 			 snapshot_number: Option<u64>, thread_name: &str,
-			 snapshot_directory: &Arc<PathBuf>){
+			 snapshots_directory: &Arc<PathBuf>){
     let encoded_passing = bincode::serialize(passing_combinations).unwrap();
     let snapshot_id: String = if let Some(num) = snapshot_number {
 	num.to_string()
@@ -723,7 +729,7 @@ fn write_worker_snapshot(passing_combinations: &Vec<(LetterCombination, u32)>,
     };
 
     let snapshot_name = thread_name.to_owned() + &snapshot_id;
-    let mut worker_snapshot_path = snapshot_directory.to_path_buf();
+    let mut worker_snapshot_path = snapshots_directory.to_path_buf();
     worker_snapshot_path.push(snapshot_name);
 
     // intentionally panic if the filesystem operation fails
