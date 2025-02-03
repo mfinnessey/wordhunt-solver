@@ -129,7 +129,7 @@ impl<'a> Board<'a> {
 
                 // only valid words of length at least 3 score
                 if new_search.prefix_len() >= 3 {
-                    self.score += POINTS[new_search.prefix_len() - 3];
+                    self.score += POINTS[new_search.prefix_len()];
                     self.words.insert(new_search.prefix());
                 }
             }

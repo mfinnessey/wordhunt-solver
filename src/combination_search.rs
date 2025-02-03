@@ -955,17 +955,18 @@ pub fn get_combination_score(
                         queue.push_back((new_search, new_counts));
                     }
                     // score and continuation
-                    Some(Answer::PrefixAndMatch) | Some(Answer::Match) => {
-                        if new_search.prefix_len() >= 3 {
-                            // TODO verify -3 indexing still appropriate
-                            score += POINTS[new_search.prefix_len() - 3];
-                        }
+                    Some(Answer::PrefixAndMatch) => {
+                        score += POINTS[new_search.prefix_len()];
 
                         let mut new_counts = remaining_counts;
                         new_counts[i] -= 1;
                         queue.push_back((new_search, new_counts));
                     }
-                    // non-viable continuation
+		    // score only
+		    Some(Answer::Match) => {
+			score += POINTS[new_search.prefix_len()];
+		    }
+                    // no score, no continuation
                     None => (),
                 }
             }
@@ -1059,5 +1060,10 @@ mod tests {
         const EXPECTED: &str = "AAAABBBBCCCCEEZZ";
         let actual = format!("{}", lc);
         assert_eq!(actual, EXPECTED);
+    }
+
+    #[test]
+    fn test_get_combination_score() {
+	// build a custom trie to verify expected score on
     }
 }
