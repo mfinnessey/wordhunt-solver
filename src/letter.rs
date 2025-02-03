@@ -1,6 +1,6 @@
+use once_cell::sync::Lazy;
 use std::collections::HashMap;
 use std::fmt;
-use once_cell::sync::Lazy;
 
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 /// simplify storage as our grammar consists of only upper case english letters
@@ -36,47 +36,47 @@ pub enum Letter {
 
 impl Into<usize> for Letter {
     fn into(self) -> usize {
-	self as usize
+        self as usize
     }
 }
 
 impl From<usize> for Letter {
     fn from(n: usize) -> Letter {
-	match n {
-	    0 => Letter::A,
-	    1 => Letter::B,
-	    2 => Letter::C,
-	    3 => Letter::D,
-	    4 => Letter::E,
-	    5 => Letter::F,
-	    6 => Letter::G,
-	    7 => Letter::H,
-	    8 => Letter::I,
-	    9 => Letter::J,
-	    10 => Letter::K,
-	    11 => Letter::L,
-	    12 => Letter::M,
-	    13 => Letter::N,
-	    14 => Letter::O,
-	    15 => Letter::P,
-	    16 => Letter::Q,
-	    17 => Letter::R,
-	    18 => Letter::S,
-	    19 => Letter::T,
-	    20 => Letter::U,
-	    21 => Letter::V,
-	    22 => Letter::W,
-	    23 => Letter::X,
-	    24 => Letter::Y,
-	    25 => Letter::Z,
-	    _ => panic!("Cannot convert values greater than 25 into a letter."),
-	}
+        match n {
+            0 => Letter::A,
+            1 => Letter::B,
+            2 => Letter::C,
+            3 => Letter::D,
+            4 => Letter::E,
+            5 => Letter::F,
+            6 => Letter::G,
+            7 => Letter::H,
+            8 => Letter::I,
+            9 => Letter::J,
+            10 => Letter::K,
+            11 => Letter::L,
+            12 => Letter::M,
+            13 => Letter::N,
+            14 => Letter::O,
+            15 => Letter::P,
+            16 => Letter::Q,
+            17 => Letter::R,
+            18 => Letter::S,
+            19 => Letter::T,
+            20 => Letter::U,
+            21 => Letter::V,
+            22 => Letter::W,
+            23 => Letter::X,
+            24 => Letter::Y,
+            25 => Letter::Z,
+            _ => panic!("Cannot convert values greater than 25 into a letter."),
+        }
     }
 }
 
 impl fmt::Display for Letter {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-	write!(f, "{}", letter_to_char(self))
+        write!(f, "{}", letter_to_char(self))
     }
 }
 
@@ -88,13 +88,12 @@ impl TryFromIterator<Letter, LetterCollect> for Vec<Letter> {
     type Error = ();
     fn try_from_iter<T>(iter: T) -> Result<Self, Self::Error>
     where
-	Self: Sized,
-	T: IntoIterator<Item = Letter>,
+    Self: Sized,
+    T: IntoIterator<Item = Letter>,
     {
-	Ok(iter.into_iter().collect::<Vec<Letter>>())
+    Ok(iter.into_iter().collect::<Vec<Letter>>())
     }
 } */
-
 
 static TRANSLATOR: Lazy<Translator> = Lazy::new(Translator::new);
 
@@ -120,87 +119,91 @@ pub struct Translator {
 }
 
 impl Translator {
-    pub fn new() -> Self{
-	Self {
-	    letter_map: HashMap::from([
-	    ('A', Letter::A),
-	    ('B', Letter::B),
-	    ('C', Letter::C),
-	    ('D', Letter::D),
-	    ('E', Letter::E),
-	    ('F', Letter::F),
-	    ('G', Letter::G),
-	    ('H', Letter::H),
-	    ('I', Letter::I),
-	    ('J', Letter::J),
-	    ('K', Letter::K),
-	    ('L', Letter::L),
-	    ('M', Letter::M),
-	    ('N', Letter::N),
-	    ('O', Letter::O),
-	    ('P', Letter::P),
-	    ('Q', Letter::Q),    
-	    ('R', Letter::R),
-	    ('S', Letter::S),
-	    ('T', Letter::T),
-	    ('U', Letter::U),
-	    ('V', Letter::V),
-	    ('W', Letter::W),
-	    ('X', Letter::X),
-	    ('Y', Letter::Y),
-	    ('Z', Letter::Z),
-	    ]),
-	    char_map: HashMap::from([
-		(Letter::A, 'A'),
-		(Letter::B, 'B'),
-		(Letter::C, 'C'),
-		(Letter::D, 'D'),
-		(Letter::E, 'E'),
-		(Letter::F, 'F'),
-		(Letter::G, 'G'),
-		(Letter::H, 'H'),
-		(Letter::I, 'I'),
-		(Letter::J, 'J'),
-		(Letter::K, 'K'),		
-		(Letter::L, 'L'),
-		(Letter::M, 'M'),
-		(Letter::N, 'N'),
-		(Letter::O, 'O'),
-		(Letter::P, 'P'),
-		(Letter::Q, 'Q'),		
-		(Letter::R, 'R'),
-		(Letter::S, 'S'),
-		(Letter::T, 'T'),
-		(Letter::U, 'U'),
-		(Letter::V, 'V'),		
-		(Letter::W, 'W'),
-		(Letter::X, 'X'),
-		(Letter::Y, 'Y'),
-		(Letter::Z, 'Z'),		
-	])}
+    pub fn new() -> Self {
+        Self {
+            letter_map: HashMap::from([
+                ('A', Letter::A),
+                ('B', Letter::B),
+                ('C', Letter::C),
+                ('D', Letter::D),
+                ('E', Letter::E),
+                ('F', Letter::F),
+                ('G', Letter::G),
+                ('H', Letter::H),
+                ('I', Letter::I),
+                ('J', Letter::J),
+                ('K', Letter::K),
+                ('L', Letter::L),
+                ('M', Letter::M),
+                ('N', Letter::N),
+                ('O', Letter::O),
+                ('P', Letter::P),
+                ('Q', Letter::Q),
+                ('R', Letter::R),
+                ('S', Letter::S),
+                ('T', Letter::T),
+                ('U', Letter::U),
+                ('V', Letter::V),
+                ('W', Letter::W),
+                ('X', Letter::X),
+                ('Y', Letter::Y),
+                ('Z', Letter::Z),
+            ]),
+            char_map: HashMap::from([
+                (Letter::A, 'A'),
+                (Letter::B, 'B'),
+                (Letter::C, 'C'),
+                (Letter::D, 'D'),
+                (Letter::E, 'E'),
+                (Letter::F, 'F'),
+                (Letter::G, 'G'),
+                (Letter::H, 'H'),
+                (Letter::I, 'I'),
+                (Letter::J, 'J'),
+                (Letter::K, 'K'),
+                (Letter::L, 'L'),
+                (Letter::M, 'M'),
+                (Letter::N, 'N'),
+                (Letter::O, 'O'),
+                (Letter::P, 'P'),
+                (Letter::Q, 'Q'),
+                (Letter::R, 'R'),
+                (Letter::S, 'S'),
+                (Letter::T, 'T'),
+                (Letter::U, 'U'),
+                (Letter::V, 'V'),
+                (Letter::W, 'W'),
+                (Letter::X, 'X'),
+                (Letter::Y, 'Y'),
+                (Letter::Z, 'Z'),
+            ]),
+        }
     }
 
     fn translate_letter(&self, c: &char) -> Option<Letter> {
-	self.letter_map.get(c).cloned()
+        self.letter_map.get(c).cloned()
     }
 
     fn translate_word(&self, word: &str) -> Result<Vec<Letter>, &'static str> {
-	let word_as_letters: Vec<Option<Letter>> = word.chars().map(|c| self.letter_map.get(&c).cloned()).collect();
-	if word_as_letters.iter().any(|l| l.is_none()) {
-	    Err("Could not decode character.")
-	} else{
-	    Ok(word_as_letters.into_iter().flatten().collect())
-	}
+        let word_as_letters: Vec<Option<Letter>> = word
+            .chars()
+            .map(|c| self.letter_map.get(&c).cloned())
+            .collect();
+        if word_as_letters.iter().any(|l| l.is_none()) {
+            Err("Could not decode character.")
+        } else {
+            Ok(word_as_letters.into_iter().flatten().collect())
+        }
     }
 
     fn to_word(&self, letters: &[Letter]) -> String {
-	letters.iter().map(|l| self.char_map[l]).collect()
+        letters.iter().map(|l| self.char_map[l]).collect()
     }
 
     fn letter_to_char(&self, letter: &Letter) -> char {
-	match self.char_map.get(letter) {
-	    Some(c) => *c,
-	    None => '!',
-	}
+        match self.char_map.get(letter) {
+            Some(c) => *c,
+            None => '!',
+        }
     }
 }
