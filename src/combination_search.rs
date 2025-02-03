@@ -1,7 +1,7 @@
 use std::collections::VecDeque;
 use std::ops::{Index, IndexMut};
 use std::cmp::Ordering;
-use std::{fs, iter, thread, time};
+use std::{fmt, fs, iter, thread, time};
 use std::time::SystemTime;
 use trie_rs::Trie;
 use trie_rs::inc_search::Answer;
@@ -115,6 +115,22 @@ impl From<LetterCombination> for [u8; ALPHABET_LENGTH] {
 impl From<[u8; ALPHABET_LENGTH]> for LetterCombination {
     fn from(frequencies: [u8; ALPHABET_LENGTH]) -> Self {
 	LetterCombination::new(frequencies)
+    }
+}
+
+impl fmt::Display for LetterCombination {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+	let mut letters = ['a'; TILE_COUNT];
+	let mut letters_idx = 0;
+	for (frequencies_idx, letter_frequency) in self.frequencies.iter().enumerate() {
+	    for _ in 0..*letter_frequency {
+		letters[letters_idx] = (b'A' + frequencies_idx as u8) as char;
+		letters_idx += 1;
+	    }
+	}
+
+	let concatenated: String = letters.iter().collect();
+	write!(f, "{}", concatenated)
     }
 }
 
@@ -609,7 +625,7 @@ fn generate_combinations(combinations: impl Iterator<Item = LetterCombination>, 
 		     remaining_combinations_count, remaining_combinations_percentage, TOTAL_COMBINATIONS_COUNT);
 	    println!("Ran for {:.1} hours. Estimate {:.1} hours remaining",
 		     elapsed_time_hours, estimated_time_remaining_hours);
-	    println!("Next combination is: {:?}.", <[u8; ALPHABET_LENGTH]>::from(combination));
+	    println!("Next combination is: {}.", combination);
 	    println!("*****");
 
 	    last_snapshot_combination_count = overall_combinations_generated_count;
@@ -842,6 +858,14 @@ mod tests {
     use super::*;
     use std::collections::HashSet;
 
+    // AAAABBBBCCCCEEZZ
+    const FREQUENCIES: [u8; ALPHABET_LENGTH] = [4, 4, 4, 0, 2, 0,
+						0, 0, 0, 0, 0, 0,
+						0, 0, 0, 0, 0, 0,
+						0, 0, 0, 0, 0, 0,
+						0, 2,
+    ];
+
     #[test]
     fn test_sequential_combination_generator(){
 	// test with 5 choose 3 without loss of generality
@@ -867,18 +891,19 @@ mod tests {
 
     #[test]
     fn test_letter_combination_to_element_indices(){
-	// test using AAAABBBBCCCCEEZZ
-	let frequencies: [u8; ALPHABET_LENGTH] = [4, 4, 4, 0, 2, 0,
-						  0, 0, 0, 0, 0, 0,
-						  0, 0, 0, 0, 0, 0,
-						  0, 0, 0, 0, 0, 0,
-						  0, 2,
-	];
+	let lc = LetterCombination::new(FREQUENCIES);
 
-	let lc = LetterCombination::new(frequencies);
-
-	let expected: [usize; TILE_COUNT] = [0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2, 4, 4, 25, 25];
+	const EXPECTED: [usize; TILE_COUNT] = [0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2, 4, 4, 25, 25];
 	let actual = letter_combination_to_element_indices(lc);
-	assert_eq!(actual, expected);
+	assert_eq!(actual, EXPECTED);
+    }
+
+    #[test]
+    fn test_letter_combination_display(){
+	let lc = LetterCombination::new(FREQUENCIES);
+
+	const EXPECTED: &str = "AAAABBBBCCCCEEZZ";
+	let actual = format!("{}", lc);
+	assert_eq!(actual, EXPECTED);
     }
 }
