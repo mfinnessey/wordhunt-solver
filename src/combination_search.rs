@@ -271,8 +271,6 @@ impl Iterator for SequentialLetterCombinationGenerator {
     }
 }
 
-// TODO replace LetterCombinationGenerator with a generic for anything that is an iterator over
-// letter combinations
 /// evaluates all combinations of letters using a given wordlist using a given metric
 pub struct CombinationEvaluator<'a, CombinationGenerator: Iterator<Item = LetterCombination>> {
     word_list: &'a Trie<Letter>,
@@ -518,8 +516,7 @@ impl<'a> CombinationEvaluator<'a, SequentialLetterCombinationGenerator> {
     }
 }
 
-// TODO comment out the design
-// TODO SPAWN THIS IN ITS OWN THREAD
+/// periodically trigger snapshots
 fn trigger_snapshots(
     stop_for_snapshot: &AtomicBool,
     snapshot_number: Arc<RwLock<u64>>,
@@ -532,7 +529,6 @@ fn trigger_snapshots(
     loop {
         // take snapshots every 15 minutes, waking every 10 seconds to check if execution has
         // completed
-        // TODO write this more cleanly
         for _ in 0..sleep_loop_count {
             if *execution_completed.lock().unwrap() {
                 return;
@@ -883,7 +879,6 @@ fn evaluate_combinations(worker_information: WorkerInformation) {
                     }
                 }
                 // workers are running ahead of the global thread - block for a while to limit context switches
-                // TODO consider exponential backoff here if this happens in practice
                 else {
                     println!("All queues are dry but not all letter combinations are exhausted. Sleeping.");
                     thread::sleep(time::Duration::from_secs(1));
