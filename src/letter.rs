@@ -207,3 +207,70 @@ impl Translator {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_translate_word() {
+        const SIXTEEN_A: &str = "AAAAAAAAAAAAAAAA";
+        let expected_sixteen_a_translation: Vec<Letter> = vec![
+            Letter::A,
+            Letter::A,
+            Letter::A,
+            Letter::A,
+            Letter::A,
+            Letter::A,
+            Letter::A,
+            Letter::A,
+            Letter::A,
+            Letter::A,
+            Letter::A,
+            Letter::A,
+            Letter::A,
+            Letter::A,
+            Letter::A,
+            Letter::A,
+        ];
+        assert_eq!(
+            translate_word(SIXTEEN_A).unwrap(),
+            expected_sixteen_a_translation
+        );
+
+        const ALPHABET: &str = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+        let expected_alphabet_translation: Vec<Letter> = vec![
+            Letter::A,
+            Letter::B,
+            Letter::C,
+            Letter::D,
+            Letter::E,
+            Letter::F,
+            Letter::G,
+            Letter::H,
+            Letter::I,
+            Letter::J,
+            Letter::K,
+            Letter::L,
+            Letter::M,
+            Letter::N,
+            Letter::O,
+            Letter::P,
+            Letter::Q,
+            Letter::R,
+            Letter::S,
+            Letter::T,
+            Letter::U,
+            Letter::V,
+            Letter::W,
+            Letter::X,
+            Letter::Y,
+            Letter::Z,
+        ];
+
+        assert_eq!(
+            translate_word(ALPHABET).unwrap(),
+            expected_alphabet_translation
+        );
+    }
+}
