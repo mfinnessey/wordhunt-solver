@@ -2,11 +2,10 @@ use board::Board;
 use combination_search::{
     get_combination_score, CombinationEvaluator, LetterCombination, ALL_A_FREQUENCIES,
 };
-use letter::{translate_letter, translate_word, Letter};
+use letter::Letter;
 use std::env;
-use std::fs::File;
-use std::io::{self, BufRead};
-use trie_rs::{Trie, TrieBuilder};
+use utilities::create_trie;
+
 mod board;
 mod combination_search;
 mod letter;
@@ -49,28 +48,4 @@ fn main() {
     let mut words = test_board.get_words();
     words.sort_by_key(|a| a.len());
     println!("Words in board are {:?}", words); */
-}
-
-/// create a trie from the given wordlist filepath
-fn create_trie(word_list_file_path: &str) -> (Trie<Letter>, u32) {
-    let mut word_count = 0;
-    // read from file
-    if let Ok(file) = File::open(word_list_file_path) {
-        let lines = io::BufReader::new(file).lines();
-
-        // build trie of letters
-        let mut builder: TrieBuilder<Letter> = TrieBuilder::new();
-        for line in lines.map_while(Result::ok) {
-            match translate_word(&line) {
-                Ok(word) => {
-                    builder.push(word);
-                    word_count += 1;
-                }
-                Err(e) => println!("Unable to process word {} because {e:?}", line),
-            }
-        }
-        (builder.build(), word_count)
-    } else {
-        panic!("Could not open specified file!");
-    }
 }

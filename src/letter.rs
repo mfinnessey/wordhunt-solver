@@ -190,7 +190,7 @@ impl Translator {
             .map(|c| self.letter_map.get(&c).cloned())
             .collect();
         if word_as_letters.iter().any(|l| l.is_none()) {
-            Err("Could not decode character.")
+            Err("Could not decode character. Only uppercase English letters are accepted.")
         } else {
             Ok(word_as_letters.into_iter().flatten().collect())
         }
