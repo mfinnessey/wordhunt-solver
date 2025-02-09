@@ -6,6 +6,8 @@ use trie_rs::{Trie, TrieBuilder};
 /// point values for word lengths from 0 to 16
 pub const POINTS: [u32; 17] = [0, 0, 0, 1, 4, 8, 14, 18, 22, 26, 30, 34, 38, 42, 46, 50, 54];
 
+pub const TILE_COUNT: usize = 16;
+
 /// create a trie from the given wordlist filepath
 pub fn create_trie(word_list_file_path: &str) -> (Trie<Letter>, u32) {
     let mut word_count = 0;

@@ -1,5 +1,5 @@
 use crate::letter::Letter;
-use crate::utilities::POINTS;
+use crate::utilities::{POINTS, TILE_COUNT};
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::collections::VecDeque;
@@ -25,7 +25,6 @@ const PULL_LIMIT: usize = 10_000;
 const MAX_TARGET_GLOBAL_QUEUE_LEN: usize = 2 * (WORKER_THREAD_COUNT as usize) * PULL_LIMIT;
 
 const ALPHABET_LENGTH: usize = 26;
-const TILE_COUNT: usize = 16;
 
 /// the starting value of the iterator over all letter combinations
 pub const ALL_A_FREQUENCIES: [u8; ALPHABET_LENGTH] = [
@@ -62,7 +61,7 @@ pub const ALL_A_FREQUENCIES: [u8; ALPHABET_LENGTH] = [
 const STARTUP_PUSH_COUNT: u32 = 200_000;
 
 /// the number of worker threads to run
-const WORKER_THREAD_COUNT: u8 = 16;
+const WORKER_THREAD_COUNT: u8 = 12;
 
 #[derive(Copy, Clone, Serialize, Deserialize)]
 pub struct LetterCombination {

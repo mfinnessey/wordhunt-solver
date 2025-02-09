@@ -1,4 +1,4 @@
-use crate::utilities::POINTS;
+use crate::utilities::{POINTS, TILE_COUNT};
 use crate::Letter;
 use std::collections::HashSet;
 use trie_rs::inc_search::{Answer, IncSearch};
@@ -6,7 +6,7 @@ use trie_rs::Trie;
 
 /// a concrete board. (0,0) is the top left corner and (3, 3) is the bottom right corner.
 pub struct Board<'a> {
-    tiles: [Letter; 16],
+    tiles: [Letter; TILE_COUNT],
     score: u32,
     dictionary: &'a Trie<Letter>,
     // tuples are (visited_mask, position, search)
@@ -21,7 +21,7 @@ impl<'a> Board<'a> {
     const BOARD_MAX: u8 = 3;
 
     /// constructor
-    pub fn new(tiles: [Letter; 16], dictionary: &'a Trie<Letter>) -> Self {
+    pub fn new(tiles: [Letter; TILE_COUNT], dictionary: &'a Trie<Letter>) -> Self {
         Self {
             tiles,
             dictionary,
@@ -91,12 +91,6 @@ impl<'a> Board<'a> {
         }
 
         &self.score
-    }
-
-    /// get the maximum number of paths that could be
-    /// traced through the board
-    pub fn get_path_count(&self) -> u32 {
-        0
     }
 
     /// attempt to create a new path from the current search path to the specified
