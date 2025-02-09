@@ -189,16 +189,16 @@ mod tests {
         // E I M T
         // R K E I
         // O Y R A
-        const BOARD: &str = "FLOSEIMTRKEIOYRA";
-        let tiles = translate_word(BOARD).unwrap();
-        let mut board = Board::new(tiles.try_into().unwrap(), &word_list);
+        const BOARD_1: &str = "FLOSEIMTRKEIOYRA";
+        let tiles_1 = translate_word(BOARD_1).unwrap();
+        let mut board_1 = Board::new(tiles_1.try_into().unwrap(), &word_list);
 
         // manually verified that:
         // - a word begins and ends (except ending at the bottom left tile) at every tile in this board
         // - board contains duplicate words
         // - board contains words of length [3, 8]
         // - board contains words using connections in all directions
-        const SOLUTION_WORDS: [&str; 287] = [
+        const SOLUTION_WORDS_1: [&str; 287] = [
             "SMIRKIER", "STEMLIKE", "FILMIER", "LIMITER", "MIRKIER", "OSTIARY", "REFILMS",
             "SMIRKER", "ELMIER", "ETOILE", "FIKERY", "FILMER", "KELIMS", "KRAITS", "LIMIER",
             "LIMITS", "MERITS", "MIRKER", "MOILER", "MOTIER", "OILERY", "ORIOLE", "REFILM",
@@ -230,22 +230,173 @@ mod tests {
             "YER", "YET", "YOK",
         ];
 
-        let expected_score: u32 = SOLUTION_WORDS
+        let expected_score_1: u32 = SOLUTION_WORDS_1
             .iter()
             .map(|word| POINTS[word.chars().count()])
             .sum();
-        let expected_words = HashSet::from_iter(
-            SOLUTION_WORDS
+        let expected_words_1 = HashSet::from_iter(
+            SOLUTION_WORDS_1
                 .iter()
                 .map(|word| translate_word(word).unwrap()),
         );
 
-        let actual_score = board.maximum_score();
+        let actual_score_1 = board_1.maximum_score();
 
         // check that we found all words and that the score is as expected
-        assert_eq!(&expected_score, actual_score);
-        assert_eq!(expected_words.symmetric_difference(&board.words).count(), 0);
+        assert_eq!(&expected_score_1, actual_score_1);
+        assert_eq!(
+            expected_words_1
+                .symmetric_difference(&board_1.words)
+                .count(),
+            0
+        );
 
-        // TODO test words of length [9, 15]
+        // second board. contains a word that ends at the bottom left corner.
+        // also just the more the merrier!
+        // S O H I
+        // E T T C
+        // D A A C
+        // M E N K
+        const BOARD_2: &str = "SOHIETTCDAACMENK";
+        let tiles_2 = translate_word(BOARD_2).unwrap();
+        let mut board_2 = Board::new(tiles_2.try_into().unwrap(), &word_list);
+
+        // manually verified that:
+        // - a word begins and ends (except ending at the bottom left tile) at every tile in this board
+        // - board contains duplicate words
+        // - board contains words of length [3, 8]
+        // - board contains words using connections in all directions
+        const SOLUTION_WORDS_2: [&str; 252] = [
+            "EMANATED", "EMANATES", "OEDEMATA", "ANATTOS", "ATACTIC", "CHITTED", "EDEMATA",
+            "EMANATE", "NEMATIC", "STEAMED", "STEANED", "ANADEM", "ANATTO", "ANEATH", "ATTACH",
+            "ATTACK", "CATCHT", "CATTED", "CHOTTS", "DATTOS", "DETACH", "ENATES", "ENATIC",
+            "HOSTED", "HOTTED", "MANATI", "MANATS", "MATTED", "MATTES", "MEATED", "NACHOS",
+            "OEDEMA", "SEAMED", "SEAMEN", "SEANED", "SOTTED", "STAMEN", "STANCK", "STANED",
+            "STATIC", "STEANE", "TACHOS", "TACTIC", "TEAMED", "ACNED", "ADMEN", "AEDES", "ATTIC",
+            "CACTI", "CANED", "CATCH", "CATES", "CHOSE", "CHOTA", "CHOTT", "DATES", "DATOS",
+            "DATTO", "DEATH", "DEMAN", "EANED", "EDEMA", "ENACT", "ENATE", "ETHIC", "ETHOS",
+            "HOSED", "HOSTA", "KATTI", "KNEAD", "MAAED", "MANAT", "MANED", "MATCH", "MATED",
+            "MATES", "MATTE", "MATTS", "MEATH", "MEATS", "MENAD", "NACHO", "NAMED", "NATCH",
+            "NATES", "NEATH", "NEATS", "SEAME", "SEDAN", "SETAE", "STACK", "STADE", "STANE",
+            "STANK", "STEAD", "STEAM", "STEAN", "STEDE", "TACHO", "TACIT", "TAMED", "TANKA",
+            "TATES", "TEADE", "TEAED", "THOSE", "TICCA", "TOSED", "TOTED", "TOTES", "ACNE", "ACTA",
+            "AMEN", "ATES", "CANE", "CATE", "CATS", "CHIT", "CITO", "DAES", "DAME", "DANK", "DATA",
+            "DATE", "DATO", "DEAN", "EACH", "EATH", "EATS", "ETAT", "HOED", "HOES", "HOSE", "HOST",
+            "HOTE", "HOTS", "ITCH", "KAED", "KANA", "KANE", "KATA", "KATI", "KATS", "MADE", "MAES",
+            "MANA", "MANE", "MATE", "MATH", "MATS", "MATT", "MEAD", "MEAN", "MEAT", "NAAM", "NACH",
+            "NAES", "NAME", "NATS", "NEAT", "NEMA", "OTIC", "SEAM", "SEAN", "SEAT", "SETA", "SETT",
+            "SOTH", "STAT", "STED", "STOT", "TACH", "TACK", "TACT", "TAED", "TAES", "TAME", "TANA",
+            "TANE", "TANK", "TATE", "TATH", "TATS", "TEAD", "TEAM", "TEAT", "TICH", "TOEA", "TOED",
+            "TOES", "TOSE", "TOST", "TOTE", "TOTS", "ACH", "ACT", "ANA", "ANE", "ATE", "ATT",
+            "CAN", "CAT", "CHI", "CIT", "DAE", "DAM", "DAN", "DEN", "EAN", "EAT", "EST", "ETA",
+            "ETH", "HIC", "HIT", "HOE", "HOT", "ICH", "ITA", "KAE", "KAT", "MAA", "MAD", "MAE",
+            "MAN", "MAT", "MED", "MEN", "NAE", "NAM", "NAT", "NED", "OES", "OSE", "SEA", "SED",
+            "SET", "SOH", "SOT", "TAD", "TAE", "TAK", "TAM", "TAN", "TAT", "TEA", "TED", "TES",
+            "THO", "TIC", "TOE", "TOT",
+        ];
+
+        let expected_score_2: u32 = SOLUTION_WORDS_2
+            .iter()
+            .map(|word| POINTS[word.chars().count()])
+            .sum();
+        let expected_words_2 = HashSet::from_iter(
+            SOLUTION_WORDS_2
+                .iter()
+                .map(|word| translate_word(word).unwrap()),
+        );
+
+        let actual_score_2 = board_2.maximum_score();
+
+        // check that we found all words and that the score is as expected
+        assert_eq!(&expected_score_2, actual_score_2);
+        assert_eq!(
+            expected_words_2
+                .symmetric_difference(&board_2.words)
+                .count(),
+            0
+        );
+
+        // test words of length [9, 15]
+
+        // A A R D
+        // K R A V
+        // S Z Z Z
+        // Z Z Z Z
+        const BOARD_3: &str = "AARDKRAVSZZZZZZZ";
+        let tiles_3 = translate_word(BOARD_3).unwrap();
+        let mut board_3 = Board::new(tiles_3.try_into().unwrap(), &word_list);
+        board_3.maximum_score();
+        // length 9
+        assert!(board_3
+            .words
+            .contains(&translate_word("AARDVARKS").unwrap()));
+
+        // A C R O
+        // I T A B
+        // S M X X
+        // X X X X
+        const BOARD_4: &str = "ACROITABSMXXXXXX";
+        let tiles_4 = translate_word(BOARD_4).unwrap();
+        let mut board_4 = Board::new(tiles_4.try_into().unwrap(), &word_list);
+        board_4.maximum_score();
+        // length 10
+        assert!(board_4
+            .words
+            .contains(&translate_word("ACROBATISM").unwrap()));
+
+        // A E T Z
+        // B N I Y
+        // I E C L
+        // O G A L
+        const BOARD_5: &str = "AETZBNIYIECLOGAL";
+        let tiles_5 = translate_word(BOARD_5).unwrap();
+        let mut board_5 = Board::new(tiles_5.try_into().unwrap(), &word_list);
+        board_5.maximum_score();
+        // lengths 11, 15
+        assert!(board_5
+            .words
+            .contains(&translate_word("ABIOGENETIC").unwrap()));
+        assert!(board_5
+            .words
+            .contains(&translate_word("ABIOGENETICALLY").unwrap()));
+
+        // C A P I
+        // A L U T
+        // R I E S
+        // B B B B
+        const BOARD_6: &str = "CAPIALUTRIESBBBB";
+        let tiles_6 = translate_word(BOARD_6).unwrap();
+        let mut board_6 = Board::new(tiles_6.try_into().unwrap(), &word_list);
+        board_6.maximum_score();
+        // length 12
+        assert!(board_6
+            .words
+            .contains(&translate_word("CAPITULARIES").unwrap()));
+
+        // Y E E E
+        // L S U O
+        // D I T I
+        // E P X E
+        const BOARD_7: &str = "YEEELSUODITIEPXE";
+        let tiles_7 = translate_word(BOARD_7).unwrap();
+        let mut board_7 = Board::new(tiles_7.try_into().unwrap(), &word_list);
+        board_7.maximum_score();
+        // length 13
+        assert!(board_7
+            .words
+            .contains(&translate_word("EXPEDITIOUSLY").unwrap()));
+
+        // C H I N
+        // R E H C
+        // I N C H
+        // X X E E
+        const BOARD_8: &str = "CHINREHCINCHXXEE";
+        let tiles_8 = translate_word(BOARD_8).unwrap();
+        let mut board_8 = Board::new(tiles_8.try_into().unwrap(), &word_list);
+        board_8.maximum_score();
+        // length 14
+        assert!(board_8
+            .words
+            .contains(&translate_word("CHINCHERINCHEE").unwrap()));
     }
 }
