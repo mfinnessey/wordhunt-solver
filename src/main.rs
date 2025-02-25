@@ -29,9 +29,14 @@ fn main() {
 
     let all_a_combination = LetterCombination::new(ALL_A_FREQUENCIES);
 
-    let combination_evaluator =
-        CombinationEvaluator::new(&trie, all_a_combination, get_combination_score, 164000, 16);
-    combination_evaluator.check_combinations(10);
+    let combination_evaluator = CombinationEvaluator::new(
+        &trie,
+        all_a_combination,
+        get_combination_score,
+        164000,
+        std::thread::available_parallelism().unwrap().get(),
+    );
+    combination_evaluator.begin_combination_evaluation(10);
 
     // temporary test grid from https://www.youtube.com/watch?v=3cgr_GgA5ns
     /*    let test_board_chars = ['M', 'H', 'O', 'N', 'I', 'T', 'E', 'R', 'L', 'A', 'S', 'N', 'S', 'E', 'R', 'U'];
