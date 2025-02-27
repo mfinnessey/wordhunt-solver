@@ -1,7 +1,7 @@
 use std::env;
 
 use board::Board;
-use combination_search::{get_combination_score, CombinationEvaluator};
+use combination_search::{bounding_functions::get_combination_score, CombinationSearch};
 use letter::Letter;
 use letter_combination::LetterCombination;
 use utilities::{create_trie, ALL_A_FREQUENCIES};
@@ -30,7 +30,7 @@ fn main() {
 
     let all_a_combination = LetterCombination::new(ALL_A_FREQUENCIES);
 
-    let combination_evaluator = CombinationEvaluator::new(
+    let combination_evaluator = CombinationSearch::new(
         &trie,
         all_a_combination,
         get_combination_score,
