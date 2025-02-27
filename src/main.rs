@@ -1,14 +1,15 @@
-use board::Board;
-use combination_search::{
-    get_combination_score, CombinationEvaluator, LetterCombination, ALL_A_FREQUENCIES,
-};
-use letter::Letter;
 use std::env;
-use utilities::create_trie;
+
+use board::Board;
+use combination_search::{get_combination_score, CombinationEvaluator};
+use letter::Letter;
+use letter_combination::LetterCombination;
+use utilities::{create_trie, ALL_A_FREQUENCIES};
 
 mod board;
 mod combination_search;
 mod letter;
+mod letter_combination;
 mod utilities;
 
 fn main() {
