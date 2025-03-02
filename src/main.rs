@@ -1,16 +1,12 @@
 use std::env;
 
-use board::Board;
-use combination_search::{bounding_functions::get_combination_score, CombinationSearch};
-use letter::Letter;
-use letter_combination::LetterCombination;
-use utilities::{create_trie, ALL_A_FREQUENCIES};
-
-mod board;
-mod combination_search;
-mod letter;
-mod letter_combination;
-mod utilities;
+use wordhunt_solver::board::Board;
+use wordhunt_solver::combination_search::{
+    bounding_functions::get_combination_score, CombinationSearch,
+};
+use wordhunt_solver::letter::Letter;
+use wordhunt_solver::letter_combination::LetterCombination;
+use wordhunt_solver::utilities::{create_trie, ALL_A_FREQUENCIES};
 
 fn main() {
     let args: Vec<String> = env::args().collect();

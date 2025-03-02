@@ -1,5 +1,5 @@
+use crate::letter_combination::LetterCombination;
 use crate::utilities::{ALPHABET_LENGTH, TILE_COUNT};
-use crate::LetterCombination;
 
 /// generates combinations with replacement for a specified C(N, R) as frequency
 /// counts for the N options.

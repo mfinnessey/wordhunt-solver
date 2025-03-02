@@ -1,5 +1,5 @@
+use crate::letter::Letter;
 use crate::utilities::{POINTS, TILE_COUNT};
-use crate::Letter;
 use std::collections::HashSet;
 use trie_rs::inc_search::{Answer, IncSearch};
 use trie_rs::Trie;
