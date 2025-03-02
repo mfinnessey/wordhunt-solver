@@ -2,7 +2,7 @@ use std::env;
 
 use wordhunt_solver::board::Board;
 use wordhunt_solver::combination_search::{
-    bounding_functions::get_combination_score, CombinationSearch,
+    bounding_functions::combination_score_all_possible_trie_paths, CombinationSearch,
 };
 use wordhunt_solver::letter::Letter;
 use wordhunt_solver::letter_combination::LetterCombination;
@@ -29,7 +29,7 @@ fn main() {
     let combination_evaluator = CombinationSearch::new(
         &trie,
         all_a_combination,
-        get_combination_score,
+        combination_score_all_possible_trie_paths,
         1640,
         std::thread::available_parallelism().unwrap().get(),
     );
