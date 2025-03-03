@@ -109,7 +109,10 @@ mod tests {
         // can score all combination lengths (and don't score insufficiently long words)
         let all_a_points: u32 = POINTS.iter().sum();
         let all_a_lc = LetterCombination::new(ALL_A_FREQUENCIES);
-        assert_eq!(combination_score_all_possible_trie_paths(&trie, all_a_lc), all_a_points);
+        assert_eq!(
+            combination_score_all_possible_trie_paths(&trie, all_a_lc),
+            all_a_points
+        );
 
         // should score AAA, AZA, AZC (can take multiple branches from a node) but not AZAZ (exhaust letters)
         const THREES_POINTS: u32 = 3 * POINTS[3];
@@ -117,7 +120,10 @@ mod tests {
             3, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 11, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1,
         ];
         let threes_lc = LetterCombination::new(THREES_FREQS);
-        assert_eq!(combination_score_all_possible_trie_paths(&trie, threes_lc), THREES_POINTS);
+        assert_eq!(
+            combination_score_all_possible_trie_paths(&trie, threes_lc),
+            THREES_POINTS
+        );
 
         // should score AZA, AZC, and AZACB (use C at different positions, continue past non-scoring nodes)
         const AZ_POINTS: u32 = 2 * POINTS[3] + POINTS[5];
@@ -125,6 +131,9 @@ mod tests {
             2, 1, 1, 0, 0, 0, 0, 11, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1,
         ];
         let az_lc = LetterCombination::new(AZ_FREQS);
-        assert_eq!(combination_score_all_possible_trie_paths(&trie, az_lc), AZ_POINTS);
+        assert_eq!(
+            combination_score_all_possible_trie_paths(&trie, az_lc),
+            AZ_POINTS
+        );
     }
 }
