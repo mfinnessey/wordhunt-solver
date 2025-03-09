@@ -4,7 +4,7 @@ use std::cmp::Ordering;
 use std::fmt;
 use std::ops::{Index, IndexMut};
 
-#[derive(Copy, Clone, Serialize, Deserialize)]
+#[derive(Copy, Clone, Debug, Serialize, Deserialize)]
 pub struct LetterCombination {
     frequencies: [u8; ALPHABET_LENGTH],
 }

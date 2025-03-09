@@ -734,6 +734,7 @@ dependencies = [
  "crossbeam-utils",
  "louds-rs",
  "once_cell",
+ "regex",
  "serde",
  "trie-rs",
 ]
