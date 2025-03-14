@@ -117,12 +117,14 @@ pub fn evaluate_combinations(worker_information: WorkerInformation) {
                 }
             }
             None => {
-                // completed
+                // nothing remaining period - we're done!
                 if *all_combinations_generated.read().unwrap() {
+                    // move the local passed vector to the shared vector
+                    *pass_vector.lock().unwrap() = passed_local;
                     return;
                 }
 
-                // check if we should dump for a snapshot
+                // there's stuff remaining, but the queues are dry - check if we should dump for a snapshot
                 if stop_for_snapshot.load(MemoryOrdering::SeqCst) {
                     let mut is_last_worker = false;
                     let mut can_stop_for_snapshot = false;
@@ -170,7 +172,7 @@ pub fn evaluate_combinations(worker_information: WorkerInformation) {
                         }
                     }
                 }
-                // workers are running ahead of the global thread - block for a while to limit context switch thrashing
+                // queues are dry, but no snapshot has been triggered - workers are running ahead of the generator
                 else {
                     println!("All queues are dry but not all letter combinations are exhausted. Sleeping.");
                     thread::sleep(time::Duration::from_secs(1));

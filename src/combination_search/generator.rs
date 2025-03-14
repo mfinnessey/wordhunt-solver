@@ -84,5 +84,7 @@ pub fn generate_combinations(
     }
 
     println!("Generated all combinations");
+    *batch_count.lock().unwrap() = local_batch_count;
+    // next_combination will be garbage, but that's fine as we've already thrown all the combinations to the queue
     *all_combinations_generated.write().unwrap() = true;
 }

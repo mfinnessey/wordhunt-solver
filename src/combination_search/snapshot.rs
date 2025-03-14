@@ -5,7 +5,7 @@ use crossbeam_deque::Injector;
 use regex::Regex;
 use std::collections::HashSet;
 use std::fs::{read, read_dir};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering as MemoryOrdering};
 use std::sync::{Arc, Condvar, Mutex, RwLock};
 use std::time::SystemTime;
@@ -29,7 +29,7 @@ pub fn take_snapshots(
     global_queue: Arc<Injector<LetterCombination>>,
     generator_next_combination: Arc<Mutex<LetterCombination>>,
     batch_count: Arc<Mutex<u64>>,
-) {
+) -> PathBuf {
     let start_time = SystemTime::now();
 
     // create snapshots directory with time-based unique identifier
@@ -132,7 +132,7 @@ pub fn take_snapshots(
         fs::write(generator_snapshot_path, encoded_next).unwrap();
         println!("Finished writing snapshot to disk.");
 
-        // write statistics (we don't need hold the other threads for this)
+        // write statistics
         let batch_evaluated_count = *batch_count.lock().unwrap();
         progress_statistics.update_with_batch(
             batch_pass_count as u64,
@@ -142,7 +142,7 @@ pub fn take_snapshots(
         );
 
         if is_last_snapshot {
-            return;
+            return snapshots_directory.into();
         }
 
         // reset for next snapshot
@@ -233,28 +233,10 @@ pub fn aggregate_snapshots_from_directory<P: AsRef<Path>>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::fs::{create_dir, remove_dir_all};
+    use crate::utilities::test_utilities::TestCleanup;
+    use std::fs::create_dir;
 
     const TEMP_DIR: &str = "unittest";
-
-    /// convenience struct to ensure that temporary test files get cleaned up
-    /// even after a panic
-    struct TestCleanup {
-        // individual test dirs to enable test cases to run in parallel
-        test_dir: String,
-    }
-
-    impl TestCleanup {
-        fn new(test_dir: String) -> Self {
-            Self { test_dir }
-        }
-    }
-
-    impl Drop for TestCleanup {
-        fn drop(&mut self) {
-            remove_dir_all(self.test_dir.clone()).unwrap();
-        }
-    }
 
     #[test]
     fn test_aggregate_snapshots_from_directory() {

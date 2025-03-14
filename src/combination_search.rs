@@ -4,6 +4,7 @@ use crate::utilities::ALL_A_FREQUENCIES;
 use combination_generator::SequentialLetterCombinationGenerator;
 use generator::generate_combinations;
 use snapshot::take_snapshots;
+use std::path::PathBuf;
 use std::{thread, time};
 use trie_rs::Trie;
 use worker::{evaluate_combinations, WorkerInformation};
@@ -47,7 +48,9 @@ impl<'a, Generator: Iterator<Item = LetterCombination> + std::marker::Send>
     CombinationSearch<'a, Generator>
 {
     /// spawn threads to create combination evaluation architecture
-    pub fn begin_combination_evaluation(self, snapshot_frequency: u64) {
+    pub fn evaluate_combinations(self, snapshot_frequency: u64) -> PathBuf {
+        let mut snapshot_path: PathBuf = "INVALID".into();
+
         let global_queue = Injector::new();
 
         let mut workers: Vec<Worker<LetterCombination>> = Vec::new();
@@ -96,6 +99,7 @@ impl<'a, Generator: Iterator<Item = LetterCombination> + std::marker::Send>
 
         crossbeam_thread::scope(|s| {
             // spawn the generator thread
+            let max_target_queue_size = 2 * self.num_worker_threads * PULL_LIMIT;
             let global_queue_ref_for_generator = global_queue_ref.clone();
             let all_combinations_generated = &all_combinations_generated;
             let stop_for_snapshot = &stop_for_snapshot;
@@ -108,7 +112,7 @@ impl<'a, Generator: Iterator<Item = LetterCombination> + std::marker::Send>
                 generate_combinations(
                     self.combinations,
                     global_queue_ref_for_generator,
-                    2 * self.num_worker_threads * PULL_LIMIT,
+                    max_target_queue_size,
                     Arc::clone(all_combinations_generated),
                     stop_for_snapshot,
                     Arc::clone(generator_thread_stopped),
@@ -185,11 +189,14 @@ impl<'a, Generator: Iterator<Item = LetterCombination> + std::marker::Send>
 
             // execution is complete after the last worker terminates
             *execution_completed.lock().unwrap() = true;
-            if snapshot_handle.join().is_err() {
-                panic!("Snapshot thread paniced!")
+            match snapshot_handle.join() {
+                Ok(path) => snapshot_path = path,
+                Err(_e) => panic!("snapshot thread paniced!"),
             }
         })
         .unwrap(); // unwrap as we would just panic anyways
+
+        snapshot_path
     }
 }
 
@@ -209,5 +216,152 @@ impl<'a> CombinationSearch<'a, SequentialLetterCombinationGenerator> {
             target,
             num_worker_threads,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::utilities::test_utilities::TestCleanup;
+    use crate::utilities::{ALPHABET_LENGTH, TILE_COUNT};
+    use snapshot::aggregate_snapshots_from_directory;
+    use std::collections::HashMap;
+
+    use super::*;
+
+    /// count the number of a's in the combination as an arbitrary, verifiable metric
+    fn count_letter_a(_word_list: &Trie<Letter>, combination: LetterCombination) -> u32 {
+        combination[0].into()
+    }
+
+    /// fake combination generation for testing with bounded size
+    /// stores all combinations with at least as many specified a's.
+    struct FakeLetterCombinationGenerator {
+        a_count: u8,
+        combination_count: u32,
+        target_combination_count: u32,
+    }
+
+    impl FakeLetterCombinationGenerator {
+        fn new(target_combination_count: u32) -> Self {
+            Self {
+                a_count: 0,
+                combination_count: 0,
+                target_combination_count,
+            }
+        }
+    }
+
+    impl Iterator for FakeLetterCombinationGenerator {
+        type Item = LetterCombination;
+        fn next(&mut self) -> Option<Self::Item> {
+            if self.combination_count >= self.target_combination_count {
+                return None;
+            }
+
+            let b_count: u8 = (TILE_COUNT as u8) - self.a_count;
+            let freqs: [u8; ALPHABET_LENGTH] = [
+                self.a_count,
+                b_count,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+            ];
+            let lc = LetterCombination::new(freqs);
+
+            // increment
+            self.a_count = (self.a_count + 1) % (TILE_COUNT as u8);
+            self.combination_count += 1;
+
+            Some(lc)
+        }
+    }
+
+    /// implementation for raw stage 1 search
+    impl<'a> CombinationSearch<'a, FakeLetterCombinationGenerator> {
+        // it's a fake - don't need to use everything
+        #[allow(unused_variables)]
+        pub fn fake_new(
+            word_list: &'a Trie<Letter>,
+            starting_frequencies: LetterCombination,
+            metric: fn(&Trie<Letter>, LetterCombination) -> u32,
+            target: u32,
+            num_worker_threads: usize,
+            target_combination_count: u32,
+        ) -> Self {
+            Self {
+                word_list,
+                combinations: FakeLetterCombinationGenerator::new(target_combination_count),
+                metric,
+                target,
+                num_worker_threads,
+            }
+        }
+    }
+
+    #[test]
+    #[ignore = "a very intensive \"unit\" test that is really a stage 1 search integration test with a fake generator"]
+    fn test_combination_search() {
+        let dummy_trie = trie_rs::TrieBuilder::new().build();
+        let dummy_lc = LetterCombination::new(ALL_A_FREQUENCIES);
+        let target_a_count = 8;
+        let combination_count = 600_000;
+        let fake_combination_generator = FakeLetterCombinationGenerator::new(combination_count);
+
+        let fcs: CombinationSearch<FakeLetterCombinationGenerator> = CombinationSearch::fake_new(
+            &dummy_trie,
+            dummy_lc,
+            count_letter_a,
+            target_a_count,
+            std::thread::available_parallelism().unwrap().get(),
+            combination_count,
+        );
+
+        let snapshot_path = fcs.evaluate_combinations(60);
+        let _test_cleanup = TestCleanup::new(snapshot_path.clone());
+
+        let expected: HashMap<PassMsg, usize> = fake_combination_generator
+            .filter_map(|x| {
+                let actual_count = count_letter_a(&dummy_trie, x);
+                if actual_count >= target_a_count {
+                    Some((x, actual_count))
+                } else {
+                    None
+                }
+            })
+            .fold(HashMap::new(), |mut map, val| {
+                map.entry(val).and_modify(|frq| *frq += 1).or_insert(1);
+                map
+            });
+
+        let actual: HashMap<PassMsg, usize> = aggregate_snapshots_from_directory(snapshot_path)
+            .unwrap()
+            .iter()
+            .fold(HashMap::new(), |mut map, val| {
+                map.entry(*val).and_modify(|frq| *frq += 1).or_insert(1);
+                map
+            });
+
+        assert_eq!(actual, expected);
     }
 }
