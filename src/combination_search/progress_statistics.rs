@@ -74,7 +74,6 @@ impl ProgressStatistics {
             (hours_per_combination * TOTAL_COMBINATIONS_COUNT as f64) - elapsed_time_hours;
 
         println!("*****");
-        println!("Wrote snapshot to disk.");
         println!(
             "Batch: Total {} | Pass {} | Fail {} | Pass Rate {:.2}",
             batch_evaluated_count, batch_pass_count, batch_fail_count, batch_pass_rate

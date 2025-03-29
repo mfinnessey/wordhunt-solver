@@ -111,9 +111,7 @@ impl Iterator for SequentialLetterCombinationGenerator {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::letter::translate_word;
     use std::collections::HashSet;
-    use trie_rs::TrieBuilder;
 
     // AAAABBBBCCCCEEZZ
     const FREQUENCIES: [u8; ALPHABET_LENGTH] = [
