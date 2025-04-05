@@ -13,19 +13,20 @@ use std::{fs, thread, time};
 
 // no way around passing everything in, and no sense in a convenience struct
 // given that it's a singular thread
+// TODO dump stuff to a log file (e.g. snapshot numbers, etc.)
 #[allow(clippy::too_many_arguments)]
 /// periodically take snapshots
 pub fn take_snapshots(
     snapshot_frequency_secs: u64,
-    execution_completed: Arc<Mutex<bool>>,
     stop_for_snapshot: &AtomicBool,
     workers_stopped: Arc<(Mutex<bool>, Condvar)>,
     generator_stopped: Arc<RwLock<bool>>,
     workers_snapshot_complete: Arc<(Mutex<bool>, Condvar)>,
     generator_snapshot_complete: Arc<(Mutex<bool>, Condvar)>,
+    all_combinations_generated: Arc<RwLock<bool>>,
     worker_pass_vectors: Vec<Arc<Mutex<Vec<PassMsg>>>>,
     num_running_workers: Arc<Mutex<usize>>,
-    num_workers: usize,
+    num_active_workers: Arc<Mutex<usize>>,
     global_queue: Arc<Injector<LetterCombination>>,
     generator_next_combination: Arc<Mutex<LetterCombination>>,
     batch_count: Arc<Mutex<u64>>,
@@ -56,39 +57,67 @@ pub fn take_snapshots(
     loop {
         // take snapshots on the specified interval, waking periodically to check for overall completion
         for _ in 0..sleep_loop_count {
-            if *execution_completed.lock().unwrap() {
+            thread::sleep(time::Duration::from_secs(
+                CHECK_FOR_COMPLETION_INTERVAL_SECS,
+            ));
+
+            if *num_active_workers.lock().unwrap() == 0 {
                 is_last_snapshot = true;
                 break;
             }
+        }
 
+        if *num_active_workers.lock().unwrap() == 0 {
+            is_last_snapshot = true;
+        }
+
+        // reset indicators that the snapshot was complete, after we verify
+        // that all threads (worker and generator) have resumed from the snapshot.
+        // generator indicates this by setting generator_snapshot_complete (its stop indicator)
+        // to false (or alternatively the generator has completed)
+        // the workers indicate this by incrementing the number of running workers.
+        // note that this check is particularly key as not all workers may have been scheduled
+        // yet after a snapshot is completed
+        while (*generator_snapshot_complete.0.lock().unwrap()
+            && !*all_combinations_generated.read().unwrap())
+            || *num_running_workers.lock().unwrap() != *num_active_workers.lock().unwrap()
+        {
             thread::sleep(time::Duration::from_secs(
                 CHECK_FOR_COMPLETION_INTERVAL_SECS,
             ));
         }
-
-        // stop the other threads for the snapshot
-        // reset indicators that the snapshot was complete
         *workers_snapshot_complete.0.lock().unwrap() = false;
-        *generator_snapshot_complete.0.lock().unwrap() = false;
+
         // trigger the snapshot
-        println!("Taking snapshot.");
+        println!("Taking snapshot {}.", snapshot_number);
         stop_for_snapshot.store(true, MemoryOrdering::SeqCst);
 
         // wait for the other threads to have stopped
         // workers stop after the generator by constrution, so only need to check that
-        // we need not (and should not) do this for the last snapshot
+        // we need not (and should not) if we know that execution has already completed
         if !is_last_snapshot {
+            println!("waiting for other threads to stop");
             let (ref workers_stopped_lock, ref workers_stopped_condvar) = *workers_stopped;
             let mut snapshot_completed_check = workers_stopped_lock.lock().unwrap();
             while !*snapshot_completed_check {
-                snapshot_completed_check = workers_stopped_condvar
-                    .wait(snapshot_completed_check)
+                let result = workers_stopped_condvar
+                    .wait_timeout(snapshot_completed_check, time::Duration::from_secs(60))
                     .unwrap();
+
+                // this loop is racy with the last worker thread stopping.
+                // prevent the case where the worker stops before we're waiting
+                // on the condvar and we never get signaled :/
+                if result.1.timed_out() && *num_active_workers.lock().unwrap() == 0 {
+                    is_last_snapshot = true;
+                    break;
+                }
+
+                snapshot_completed_check = result.0;
             }
         }
 
         // check that a snapshot invariant (empty queues at completion) has been satisfied
-        if global_queue.len() != 0 {
+        if !global_queue.is_empty() {
             panic!(
                 "Global queue was not empty ({} combination(s)) at end of snapshot",
                 global_queue.len()
@@ -99,8 +128,12 @@ pub fn take_snapshots(
         // aggregate worker vectors for a single write
         let mut passing_results: Vec<PassMsg> = Vec::new();
         for mutex in worker_pass_vectors.iter() {
-            let worker_vec = mutex.lock().unwrap();
+            let mut worker_vec = mutex.lock().unwrap();
             passing_results.extend(worker_vec.iter());
+            // reset to an empty vector to correctly handle the pathological case where the last snapshot
+            // is triggered with some workers stopping and others terminating to avoid duplicating
+            // the last snapshot on the final "cleanup" snapshot triggered when no workers are active
+            *worker_vec = Vec::new();
         }
 
         let batch_pass_count = passing_results.len();
@@ -142,6 +175,7 @@ pub fn take_snapshots(
         );
 
         if is_last_snapshot {
+            println!("snapshot thread terminating on last snapshot");
             return snapshots_directory.into();
         }
 
@@ -160,7 +194,6 @@ pub fn take_snapshots(
 
         // re-start the worker threads
         // reset from this snapshot
-        *num_running_workers.lock().unwrap() = num_workers;
         *workers_stopped.0.lock().unwrap() = false;
         // signal workers to resume
         *workers_snapshot_complete.0.lock().unwrap() = true;

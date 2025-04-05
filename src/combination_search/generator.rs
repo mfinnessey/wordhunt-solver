@@ -69,6 +69,7 @@ pub fn generate_combinations(
                 snapshot_completed_check = condvar.wait(snapshot_completed_check).unwrap();
             }
 
+            *snapshot_completed_check = false;
             println!("Generator thread resuming after snapshot.");
 
             // reset batch
@@ -86,5 +87,6 @@ pub fn generate_combinations(
     println!("Generated all combinations");
     *batch_count.lock().unwrap() = local_batch_count;
     // next_combination will be garbage, but that's fine as we've already thrown all the combinations to the queue
+    *generator_thread_stopped.write().unwrap() = true;
     *all_combinations_generated.write().unwrap() = true;
 }

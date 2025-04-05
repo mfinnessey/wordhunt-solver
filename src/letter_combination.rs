@@ -4,7 +4,7 @@ use std::cmp::Ordering;
 use std::fmt;
 use std::ops::{Index, IndexMut};
 
-#[derive(Copy, Clone, Debug, Hash, Serialize, Deserialize)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct LetterCombination {
     frequencies: [u8; ALPHABET_LENGTH],
 }
@@ -43,11 +43,11 @@ impl PartialOrd for LetterCombination {
     }
 }
 
-impl PartialEq for LetterCombination {
+/*impl PartialEq for LetterCombination {
     fn eq(&self, other: &Self) -> bool {
         self.frequencies == other.frequencies
     }
-}
+}*/
 
 impl Index<usize> for LetterCombination {
     type Output = u8;
@@ -74,7 +74,7 @@ impl IndexMut<usize> for LetterCombination {
     }
 }
 
-impl Eq for LetterCombination {}
+/*impl Eq for LetterCombination {}*/
 
 impl From<LetterCombination> for [u8; ALPHABET_LENGTH] {
     fn from(frequencies: LetterCombination) -> Self {

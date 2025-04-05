@@ -80,6 +80,7 @@ impl<'a, Generator: Iterator<Item = LetterCombination> + std::marker::Send>
         let workers_stopped_condvar = Condvar::new();
         let workers_stopped = Arc::new((workers_stopped_mutex, workers_stopped_condvar));
         let num_running_workers: Arc<Mutex<usize>> = Arc::new(Mutex::new(self.num_worker_threads));
+        let num_active_workers: Arc<Mutex<usize>> = Arc::new(Mutex::new(self.num_worker_threads));
         let workers_snapshot_complete_mutex = Mutex::new(false);
         let workers_snapshot_complete_condvar = Condvar::new();
         let workers_snapshot_complete = Arc::new((
@@ -95,7 +96,6 @@ impl<'a, Generator: Iterator<Item = LetterCombination> + std::marker::Send>
 
         let stealers_vec_ref = Arc::new(stealers);
         let global_queue_ref = Arc::new(global_queue);
-        let execution_completed = Arc::new(Mutex::new(false));
 
         crossbeam_thread::scope(|s| {
             // spawn the generator thread
@@ -147,6 +147,7 @@ impl<'a, Generator: Iterator<Item = LetterCombination> + std::marker::Send>
                     Arc::clone(generator_thread_stopped),
                     Arc::clone(workers_stopped),
                     Arc::clone(&num_running_workers),
+                    Arc::clone(&num_active_workers),
                     Arc::clone(&workers_snapshot_complete),
                 );
                 let handle = s
@@ -158,19 +159,18 @@ impl<'a, Generator: Iterator<Item = LetterCombination> + std::marker::Send>
             }
 
             // spawn snapshot thread
-            let execution_completed = &execution_completed;
             let snapshot_handle = s.spawn(move |_| {
                 take_snapshots(
                     snapshot_frequency,
-                    Arc::clone(execution_completed),
                     stop_for_snapshot,
                     Arc::clone(workers_stopped),
                     Arc::clone(generator_thread_stopped),
                     Arc::clone(&workers_snapshot_complete),
                     Arc::clone(generator_snapshot_complete),
+                    Arc::clone(all_combinations_generated),
                     pass_vectors,
                     Arc::clone(&num_running_workers),
-                    self.num_worker_threads,
+                    Arc::clone(&num_active_workers),
                     global_queue_ref,
                     Arc::clone(next_combination),
                     Arc::clone(batch_count),
@@ -187,8 +187,6 @@ impl<'a, Generator: Iterator<Item = LetterCombination> + std::marker::Send>
                 }
             }
 
-            // execution is complete after the last worker terminates
-            *execution_completed.lock().unwrap() = true;
             match snapshot_handle.join() {
                 Ok(path) => snapshot_path = path,
                 Err(_e) => panic!("snapshot thread paniced!"),
@@ -223,13 +221,97 @@ impl<'a> CombinationSearch<'a, SequentialLetterCombinationGenerator> {
 mod tests {
     use crate::utilities::test_utilities::TestCleanup;
     use crate::utilities::{ALPHABET_LENGTH, TILE_COUNT};
+    use rand::random_range;
     use snapshot::aggregate_snapshots_from_directory;
+    use std::cmp::min;
     use std::collections::HashMap;
+    use std::hint::black_box;
 
     use super::*;
 
+    #[test]
+    #[ignore = "a very intensive \"unit\" test that is really a stage 1 search integration test with a fake generator"]
+    fn test_combination_search() {
+        // very rapid snapshots to stress-test the infrastucture
+        test_fake_combination_search(
+            3_000_000,
+            std::thread::available_parallelism().unwrap().get(),
+            1,
+            8,
+        );
+
+        // a generic large test to (mostly) behave as in the real run
+        test_fake_combination_search(
+            6_000_000,
+            std::thread::available_parallelism().unwrap().get(),
+            60,
+            8,
+        );
+    }
+
+    /// test combination search with the specified parameters using a fake combination generator that counts
+    /// the frequency of the letter 'A'
+    fn test_fake_combination_search(
+        combination_count: u32,
+        num_workers: usize,
+        snapshot_frequency_secs: u64,
+        target_a_count: u32,
+    ) {
+        let dummy_trie = trie_rs::TrieBuilder::new().build();
+        let dummy_lc = LetterCombination::new(ALL_A_FREQUENCIES);
+        let fake_combination_generator = FakeLetterCombinationGenerator::new(combination_count);
+        println!(
+            "running test_combination_search with {} workers",
+            num_workers
+        );
+
+        let fcs: CombinationSearch<FakeLetterCombinationGenerator> = CombinationSearch::fake_new(
+            &dummy_trie,
+            dummy_lc,
+            count_letter_a,
+            target_a_count,
+            num_workers,
+            combination_count,
+        );
+
+        let snapshot_path = fcs.evaluate_combinations(snapshot_frequency_secs);
+        let _test_cleanup = TestCleanup::new(snapshot_path.clone());
+
+        let expected: HashMap<PassMsg, usize> = fake_combination_generator
+            .filter_map(|x| {
+                let actual_count = count_letter_a(&dummy_trie, x);
+                if actual_count >= target_a_count {
+                    Some((x, actual_count))
+                } else {
+                    None
+                }
+            })
+            .fold(HashMap::new(), |mut map, val| {
+                map.entry(val).and_modify(|frq| *frq += 1).or_insert(1);
+                map
+            });
+
+        let actual: HashMap<PassMsg, usize> = aggregate_snapshots_from_directory(snapshot_path)
+            .unwrap()
+            .iter()
+            .fold(HashMap::new(), |mut map, val| {
+                map.entry(*val).and_modify(|frq| *frq += 1).or_insert(1);
+                map
+            });
+
+        assert_eq!(actual, expected);
+    }
+
     /// count the number of a's in the combination as an arbitrary, verifiable metric
     fn count_letter_a(_word_list: &Trie<Letter>, combination: LetterCombination) -> u32 {
+        // use the last u8's  high for the range to make
+        // the signature still match. a fun lil testing hack!
+        let high: u32 = (min(1, combination[25]) as u32) * 1_000;
+
+        // simulate doing some real work
+        for _ in 1..random_range(100..high) {
+            black_box(())
+        }
         combination[0].into()
     }
 
@@ -258,10 +340,9 @@ mod tests {
                 return None;
             }
 
-            let b_count: u8 = (TILE_COUNT as u8) - self.a_count;
+            let non_a_count: u8 = (TILE_COUNT as u8) - self.a_count;
             let freqs: [u8; ALPHABET_LENGTH] = [
                 self.a_count,
-                b_count,
                 0,
                 0,
                 0,
@@ -286,6 +367,7 @@ mod tests {
                 0,
                 0,
                 0,
+                non_a_count,
             ];
             let lc = LetterCombination::new(freqs);
 
@@ -317,51 +399,5 @@ mod tests {
                 num_worker_threads,
             }
         }
-    }
-
-    #[test]
-    #[ignore = "a very intensive \"unit\" test that is really a stage 1 search integration test with a fake generator"]
-    fn test_combination_search() {
-        let dummy_trie = trie_rs::TrieBuilder::new().build();
-        let dummy_lc = LetterCombination::new(ALL_A_FREQUENCIES);
-        let target_a_count = 8;
-        let combination_count = 600_000;
-        let fake_combination_generator = FakeLetterCombinationGenerator::new(combination_count);
-
-        let fcs: CombinationSearch<FakeLetterCombinationGenerator> = CombinationSearch::fake_new(
-            &dummy_trie,
-            dummy_lc,
-            count_letter_a,
-            target_a_count,
-            std::thread::available_parallelism().unwrap().get(),
-            combination_count,
-        );
-
-        let snapshot_path = fcs.evaluate_combinations(60);
-        let _test_cleanup = TestCleanup::new(snapshot_path.clone());
-
-        let expected: HashMap<PassMsg, usize> = fake_combination_generator
-            .filter_map(|x| {
-                let actual_count = count_letter_a(&dummy_trie, x);
-                if actual_count >= target_a_count {
-                    Some((x, actual_count))
-                } else {
-                    None
-                }
-            })
-            .fold(HashMap::new(), |mut map, val| {
-                map.entry(val).and_modify(|frq| *frq += 1).or_insert(1);
-                map
-            });
-
-        let actual: HashMap<PassMsg, usize> = aggregate_snapshots_from_directory(snapshot_path)
-            .unwrap()
-            .iter()
-            .fold(HashMap::new(), |mut map, val| {
-                map.entry(*val).and_modify(|frq| *frq += 1).or_insert(1);
-                map
-            });
-
-        assert_eq!(actual, expected);
     }
 }

@@ -32,6 +32,12 @@ pub struct WorkerInformation<'a> {
     workers_stopped: Arc<(Mutex<bool>, Condvar)>,
     /// the number of worker threads that are running - used to determine which thread is the last to stop for a snapshot.
     num_running_workers: Arc<Mutex<usize>>,
+    /// the number of workers that are active (i.e. haven't returned) - used to cover the pathological case where
+    /// 1) a snapshot is triggered between generation completion and run completion 2) workers are split between
+    /// termination and snapshotting 3) workers are not rescheduled to complete before the next snapshot 4) the
+    /// snapshot thread blocks on a condvar that will never be signaled as the full complement of workers will never
+    /// decrement num_running_workers again for a worker to be the "last" worker.
+    num_active_workers: Arc<Mutex<usize>>,
     /// set by the snapshot thread to notify the worker threads that the snapshot has been completed
     snapshot_complete: Arc<(Mutex<bool>, Condvar)>,
 }
@@ -52,6 +58,7 @@ impl<'a> WorkerInformation<'a> {
         generator_thread_stopped: Arc<RwLock<bool>>,
         workers_stopped: Arc<(Mutex<bool>, Condvar)>,
         num_running_workers: Arc<Mutex<usize>>,
+        num_active_workers: Arc<Mutex<usize>>,
         snapshot_complete: Arc<(Mutex<bool>, Condvar)>,
     ) -> Self {
         Self {
@@ -67,6 +74,7 @@ impl<'a> WorkerInformation<'a> {
             generator_thread_stopped,
             workers_stopped,
             num_running_workers,
+            num_active_workers,
             snapshot_complete,
         }
     }
@@ -86,6 +94,7 @@ pub fn evaluate_combinations(worker_information: WorkerInformation) {
     let generator_thread_stopped = worker_information.generator_thread_stopped;
     let workers_stopped = worker_information.workers_stopped;
     let num_running_workers = worker_information.num_running_workers;
+    let num_active_workers = worker_information.num_active_workers;
     let snapshot_complete = worker_information.snapshot_complete;
 
     let mut passed_local = Vec::new();
@@ -121,6 +130,36 @@ pub fn evaluate_combinations(worker_information: WorkerInformation) {
                 if *all_combinations_generated.read().unwrap() {
                     // move the local passed vector to the shared vector
                     *pass_vector.lock().unwrap() = passed_local;
+
+                    // it's possible for all_combinations_generated to be set after some workers have stopped
+                    // for a snapshot but not all, so we need to be compatible with the normal start / stop
+                    // mechanism
+                    {
+                        let mut running_worker_count = num_running_workers.lock().unwrap();
+                        // decrement active workers before running workers to ensure that any subsequent restart
+                        // doesn't rely on this thread restarting (as the decrement to the running workers MUST occur
+                        // before such a restart attempt by construction, but we could be the second to last thread to
+			// stop here with the last thread stopping in the "normal" snapshot case)
+                        *num_active_workers.lock().unwrap() -= 1;
+                        *running_worker_count -= 1;
+                        if *running_worker_count == 1 {
+                            notify_snapshot_thread_all_workers_stopped(&workers_stopped);
+                        }
+                    }
+
+                    // we need not wait to be restarted - we're done!
+
+                    // check invariant (local queue empty at thread termination)
+                    if !local.is_empty() {
+                        panic!("Local queue on thread {} was not empty ({} combination(s)) at end of snapshot.",
+			       thread::current().name().unwrap_or("unnamed"), local.len())
+                    }
+
+                    println!(
+                        "thread {} completed execution",
+                        thread::current().name().unwrap_or("unnamed")
+                    );
+
                     return;
                 }
 
@@ -142,7 +181,6 @@ pub fn evaluate_combinations(worker_information: WorkerInformation) {
                         }
                         // not the last worker thread stopping, so can freely stop and write snapshot
                         else {
-                            *running_worker_count -= 1;
                             can_stop_for_snapshot = true;
                         }
 
@@ -154,12 +192,20 @@ pub fn evaluate_combinations(worker_information: WorkerInformation) {
                         *pass_vector.lock().unwrap() = passed_local;
                         passed_local = Vec::new();
 
+                        // check snapshot invariant (queues empty)
+                        if !local.is_empty() {
+                            panic!("Local queue on thread {} was not empty ({} combination(s)) at end of snapshot.",
+			    thread::current().name().unwrap_or("unnamed"), local.len())
+                        }
+
+                        *num_running_workers.lock().unwrap() -= 1;
+                        println!(
+                            "thread {} stopped for snapshot",
+                            thread::current().name().unwrap_or("unnamed")
+                        );
+
                         if is_last_worker {
-                            // notify the snapshot thread that all workers have stopped.
-                            let mut workers_stopped_predicate = workers_stopped.0.lock().unwrap();
-                            *workers_stopped_predicate = true;
-                            let workers_stopped_cvar = &workers_stopped.1;
-                            workers_stopped_cvar.notify_all();
+                            notify_snapshot_thread_all_workers_stopped(&workers_stopped);
                         }
 
                         // block until the global thread has completed the snapshot
@@ -170,6 +216,12 @@ pub fn evaluate_combinations(worker_information: WorkerInformation) {
                                 .wait(snapshot_complete_predicate)
                                 .unwrap();
                         }
+
+                        *num_running_workers.lock().unwrap() += 1;
+                        println!(
+                            "thread {} restarted after snapshot",
+                            thread::current().name().unwrap_or("unnamed")
+                        );
                     }
                 }
                 // queues are dry, but no snapshot has been triggered - workers are running ahead of the generator
@@ -180,4 +232,12 @@ pub fn evaluate_combinations(worker_information: WorkerInformation) {
             }
         }
     }
+}
+
+fn notify_snapshot_thread_all_workers_stopped(workers_stopped: &Arc<(Mutex<bool>, Condvar)>) {
+    // notify the snapshot thread that all workers have stopped.
+    let mut workers_stopped_predicate = workers_stopped.0.lock().unwrap();
+    *workers_stopped_predicate = true;
+    let workers_stopped_cvar = &workers_stopped.1;
+    workers_stopped_cvar.notify_all();
 }
