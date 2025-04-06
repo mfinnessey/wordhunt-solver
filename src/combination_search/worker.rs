@@ -139,7 +139,7 @@ pub fn evaluate_combinations(worker_information: WorkerInformation) {
                         // decrement active workers before running workers to ensure that any subsequent restart
                         // doesn't rely on this thread restarting (as the decrement to the running workers MUST occur
                         // before such a restart attempt by construction, but we could be the second to last thread to
-			// stop here with the last thread stopping in the "normal" snapshot case)
+                        // stop here with the last thread stopping in the "normal" snapshot case)
                         *num_active_workers.lock().unwrap() -= 1;
                         *running_worker_count -= 1;
                         if *running_worker_count == 1 {
@@ -182,9 +182,10 @@ pub fn evaluate_combinations(worker_information: WorkerInformation) {
                         // not the last worker thread stopping, so can freely stop and write snapshot
                         else {
                             can_stop_for_snapshot = true;
+                            *running_worker_count -= 1;
                         }
 
-                        // drop stopped_worker_count mutex
+                        // drop num_running_workers mutex
                     }
 
                     if can_stop_for_snapshot {
@@ -198,15 +199,14 @@ pub fn evaluate_combinations(worker_information: WorkerInformation) {
 			    thread::current().name().unwrap_or("unnamed"), local.len())
                         }
 
-                        *num_running_workers.lock().unwrap() -= 1;
+                        if is_last_worker {
+                            notify_snapshot_thread_all_workers_stopped(&workers_stopped);
+                        }
+
                         println!(
                             "thread {} stopped for snapshot",
                             thread::current().name().unwrap_or("unnamed")
                         );
-
-                        if is_last_worker {
-                            notify_snapshot_thread_all_workers_stopped(&workers_stopped);
-                        }
 
                         // block until the global thread has completed the snapshot
                         let mut snapshot_complete_predicate = snapshot_complete.0.lock().unwrap();
