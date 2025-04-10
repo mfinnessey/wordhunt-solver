@@ -263,10 +263,65 @@ pub fn aggregate_snapshots_from_directory<P: AsRef<Path>>(
     }
 }
 
+/// read the next combination saved to a snapshot directory
+pub fn read_next_combination_from_directory<P: AsRef<Path>>(
+    directory: P,
+) -> Result<LetterCombination, String> {
+    // find all next combination files
+    let snapshot_file_regex = Regex::new(r"^*/[0-9]+NEXT$").unwrap();
+    let mut max_snapshot_num: u32 = 0;
+    let mut max_snapshot_file_path = None;
+
+    let files = read_dir(directory).map_err(|_e| "Could not read directory!")?;
+
+    for file in files {
+        let file = file.map_err(|_e| "Error reading file returned in directory")?;
+        let file_path = file.path();
+        // ignore sub-directories (which shouldn't exist by construction, but belt & suspenders)
+        if !file_path.is_file() {
+            continue;
+        }
+        // ignore non-next combination files
+        let file_path_as_string = file_path.clone().into_os_string().into_string().unwrap();
+        if !snapshot_file_regex.is_match(&file_path_as_string) {
+            continue;
+        }
+
+        if let Some(file_name) = file_path.file_name() {
+            let file_name_str = file_name.to_str().unwrap();
+
+            let num_slice = &file_name_str[..file_name_str.len() - 4];
+            // no point in not unwrapping given it's validated by the regex
+            let snapshot_num: u32 = num_slice.parse().unwrap();
+
+            // retain the path to the maximal snapshot file that we've fouund so far (including the first)
+            // the is_none check ensures that max_snapshot_num will be initialized with real data by
+            // construction before its first reading
+            if max_snapshot_file_path.is_none() || snapshot_num > max_snapshot_num {
+                max_snapshot_num = snapshot_num;
+                max_snapshot_file_path = Some(file_path);
+            }
+        } else {
+            return Err("File has no name!".to_string());
+        }
+    }
+
+    match max_snapshot_file_path {
+        Some(path) => {
+            let data = read(path).map_err(|_e| "Error reading file data")?;
+            let deser =
+                bincode::deserialize::<LetterCombination>(&data).map_err(|e| e.to_string())?;
+            Ok(deser)
+        }
+        None => Err("No next combination files found in directory".to_string()),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::utilities::test_utilities::TestCleanup;
+    use crate::utilities::TILE_COUNT;
     use std::fs::create_dir;
 
     const TEMP_DIR: &str = "unittest";
@@ -377,5 +432,43 @@ mod tests {
         // this is a rough sanity check anyways as arbitrary data could in theory map
         // to some garbage vector unfortunately (no checksumming)
         assert!(aggregate_snapshots_from_directory(test_dir).is_err());
+    }
+
+    #[test]
+    fn test_read_next_snapshot_from_directory() {
+        let test_dir = TEMP_DIR.to_owned() + "test_read_next_snapshot_from_directory";
+        let _cleanup = TestCleanup::new(test_dir.clone());
+
+        create_dir(test_dir.clone()).unwrap();
+
+        // dump a bunch of next combination files
+        const NUM_NEXT_COMBINATION_FILES: usize = 131;
+        let mut frequencies = ALL_A_FREQUENCIES;
+        let mut to_idx = 1;
+        let mut lc = LetterCombination::new(frequencies);
+        for i in 0..NUM_NEXT_COMBINATION_FILES {
+            lc = LetterCombination::new(frequencies);
+            let encoded = bincode::serialize(&lc).unwrap();
+            fs::write(test_dir.clone() + "/" + &i.to_string() + "NEXT", encoded).unwrap();
+
+            frequencies[to_idx - 1] -= 1;
+            frequencies[to_idx] += 1;
+            if frequencies[to_idx] as usize == TILE_COUNT {
+                to_idx += 1;
+            }
+        }
+
+        // throw in a bogus file for grins
+        fs::write(test_dir.clone() + "/foo", "foo").unwrap();
+
+        assert_eq!(read_next_combination_from_directory(&test_dir).unwrap(), lc);
+
+        // test that we still get the same result if we're missing some files
+        for i in 0..NUM_NEXT_COMBINATION_FILES {
+            if i % 2 != 0 {
+                fs::remove_file(test_dir.clone() + "/" + &i.to_string() + "NEXT").unwrap();
+            }
+        }
+        assert_eq!(read_next_combination_from_directory(&test_dir).unwrap(), lc);
     }
 }
