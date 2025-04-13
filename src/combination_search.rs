@@ -18,7 +18,7 @@ use std::sync::{Arc, Condvar, Mutex, RwLock};
 pub mod bounding_functions;
 mod combination_generator;
 mod generator;
-mod progress_statistics;
+mod progress_information;
 mod snapshot;
 mod worker;
 

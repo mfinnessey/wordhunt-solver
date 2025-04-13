@@ -1,4 +1,5 @@
-use super::{progress_statistics::ProgressStatistics, PassMsg, SPIN_UP_WAIT};
+use super::progress_information::{ProgressInformation, PROGRESS_SNAPSHOT_IDENTIFIER};
+use super::{PassMsg, SPIN_UP_WAIT};
 use crate::letter_combination::LetterCombination;
 use crate::utilities::ALL_A_FREQUENCIES;
 use crossbeam_deque::Injector;
@@ -47,11 +48,12 @@ pub fn take_snapshots(
 
     const CHECK_FOR_COMPLETION_INTERVAL_SECS: u64 = 30;
     let sleep_loop_count = snapshot_frequency_secs / CHECK_FOR_COMPLETION_INTERVAL_SECS;
+    let first_combination = LetterCombination::from(ALL_A_FREQUENCIES);
     // resize syntactically requires something to overwrite elements with in case of resizing up
-    let default_pass_msg: PassMsg = (LetterCombination::from(ALL_A_FREQUENCIES), 0);
+    let default_pass_msg: PassMsg = (first_combination, 0);
     let mut snapshot_number: u32 = 0;
 
-    let mut progress_statistics = ProgressStatistics::new(start_time);
+    let mut progress_statistics = ProgressInformation::new(start_time, first_combination);
     let mut is_last_snapshot = false;
 
     loop {
@@ -150,27 +152,18 @@ pub fn take_snapshots(
         // clear out the (giant) temporary vector
         passing_results.resize(0, default_pass_msg);
 
-        // write the next combination to disk (the snapshot consists of the results up to this
-        // point and the next thing to be considered)
+        // write progress information to disk (the snapshot consists of the results up to this
+        // point, the next combination to be considered, and statistics about what we've processed so far)
         // it's important that this occurs after the previous write so that we do not erroneously
-        // skip vectors if we fail in between these steps (we would wind up with duplicates that we could
-        // harmlessly deduplicate).
+        // skip vectors if we fail in between these steps
         let next_combination = *generator_next_combination.lock().unwrap();
-        let encoded_next = bincode::serialize(&next_combination).unwrap();
-        let snapshot_name = snapshot_number.to_string() + "NEXT";
-        let mut generator_snapshot_path = snapshots_directory.to_path_buf();
-        generator_snapshot_path.push(snapshot_name);
-
-        // intentionally panic if the filesystem operation fails
-        fs::write(generator_snapshot_path, encoded_next).unwrap();
-        println!("Finished writing snapshot to disk.");
-
-        // write statistics
         let batch_evaluated_count = *batch_count.lock().unwrap();
         progress_statistics.update_with_batch(
             batch_pass_count as u64,
             batch_evaluated_count,
             &next_combination,
+            snapshot_number,
+            snapshots_directory.to_path_buf(),
             true,
         );
 
@@ -264,11 +257,12 @@ pub fn aggregate_snapshots_from_directory<P: AsRef<Path>>(
 }
 
 /// read the next combination saved to a snapshot directory
-pub fn read_next_combination_from_directory<P: AsRef<Path>>(
+pub fn read_next_progress_information_from_directory<P: AsRef<Path>>(
     directory: P,
-) -> Result<LetterCombination, String> {
+) -> Result<ProgressInformation, String> {
     // find all next combination files
-    let snapshot_file_regex = Regex::new(r"^*/[0-9]+NEXT$").unwrap();
+    let snapshot_file_regex = Regex::new(r"^*/[0-9]+PROGRESS").unwrap();
+    const PROGRESS_LENGTH: usize = 8;
     let mut max_snapshot_num: u32 = 0;
     let mut max_snapshot_file_path = None;
 
@@ -290,7 +284,7 @@ pub fn read_next_combination_from_directory<P: AsRef<Path>>(
         if let Some(file_name) = file_path.file_name() {
             let file_name_str = file_name.to_str().unwrap();
 
-            let num_slice = &file_name_str[..file_name_str.len() - 4];
+            let num_slice = &file_name_str[..file_name_str.len() - PROGRESS_LENGTH];
             // no point in not unwrapping given it's validated by the regex
             let snapshot_num: u32 = num_slice.parse().unwrap();
 
@@ -310,7 +304,7 @@ pub fn read_next_combination_from_directory<P: AsRef<Path>>(
         Some(path) => {
             let data = read(path).map_err(|_e| "Error reading file data")?;
             let deser =
-                bincode::deserialize::<LetterCombination>(&data).map_err(|e| e.to_string())?;
+                bincode::deserialize::<ProgressInformation>(&data).map_err(|e| e.to_string())?;
             Ok(deser)
         }
         None => Err("No next combination files found in directory".to_string()),
@@ -435,40 +429,64 @@ mod tests {
     }
 
     #[test]
-    fn test_read_next_snapshot_from_directory() {
-        let test_dir = TEMP_DIR.to_owned() + "test_read_next_snapshot_from_directory";
+    fn test_read_next_progress_information_from_directory() {
+        let test_dir = TEMP_DIR.to_owned() + "test_read_next_progress_information_from_directory";
         let _cleanup = TestCleanup::new(test_dir.clone());
 
         create_dir(test_dir.clone()).unwrap();
 
-        // dump a bunch of next combination files
-        const NUM_NEXT_COMBINATION_FILES: usize = 131;
+        // dump a bunch of progress information files
+        const NUM_PROGRESS_INFORMATION_FILES: usize = 131;
         let mut frequencies = ALL_A_FREQUENCIES;
         let mut to_idx = 1;
         let mut lc = LetterCombination::new(frequencies);
-        for i in 0..NUM_NEXT_COMBINATION_FILES {
+        let mut progress_info = ProgressInformation::new(SystemTime::now(), lc);
+        let mut batch_pass_count = 5;
+        let mut batch_evaluated_count = 10;
+        for i in 0..NUM_PROGRESS_INFORMATION_FILES {
             lc = LetterCombination::new(frequencies);
-            let encoded = bincode::serialize(&lc).unwrap();
-            fs::write(test_dir.clone() + "/" + &i.to_string() + "NEXT", encoded).unwrap();
 
+            // TODO update the progress statistics here...
+            progress_info.update_with_batch(
+                batch_pass_count,
+                batch_evaluated_count,
+                &lc,
+                i.try_into().unwrap(),
+                test_dir.clone().into(),
+                true,
+            );
+
+            // update information
             frequencies[to_idx - 1] -= 1;
             frequencies[to_idx] += 1;
             if frequencies[to_idx] as usize == TILE_COUNT {
                 to_idx += 1;
             }
+
+            batch_pass_count += (i % 10) as u64;
+            batch_evaluated_count += (i % 10) as u64;
         }
 
         // throw in a bogus file for grins
         fs::write(test_dir.clone() + "/foo", "foo").unwrap();
 
-        assert_eq!(read_next_combination_from_directory(&test_dir).unwrap(), lc);
+        assert_eq!(
+            read_next_progress_information_from_directory(&test_dir).unwrap(),
+            progress_info
+        );
 
         // test that we still get the same result if we're missing some files
-        for i in 0..NUM_NEXT_COMBINATION_FILES {
+        for i in 0..NUM_PROGRESS_INFORMATION_FILES {
             if i % 2 != 0 {
-                fs::remove_file(test_dir.clone() + "/" + &i.to_string() + "NEXT").unwrap();
+                fs::remove_file(
+                    test_dir.clone() + "/" + &i.to_string() + PROGRESS_SNAPSHOT_IDENTIFIER,
+                )
+                .unwrap();
             }
         }
-        assert_eq!(read_next_combination_from_directory(&test_dir).unwrap(), lc);
+        assert_eq!(
+            read_next_progress_information_from_directory(&test_dir).unwrap(),
+            progress_info
+        );
     }
 }
