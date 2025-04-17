@@ -175,6 +175,7 @@ pub fn evaluate_combinations(worker_information: WorkerInformation) {
                             let generator_stopped = generator_thread_stopped.read().unwrap();
                             if *generator_stopped {
                                 can_stop_for_snapshot = true;
+				*running_worker_count -= 1;
                             }
                             // don't allow stopping if we were to be the last worker thread to stop
                             // but the global thread has not stopped yet (busy wait)
