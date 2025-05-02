@@ -1,39 +1,64 @@
 use std::env;
+use std::sync::{Arc, Mutex};
 
-use wordhunt_solver::board::Board;
+use wordhunt_solver::combination_search::combination_generator::SequentialLetterCombinationGenerator;
 use wordhunt_solver::combination_search::{
     bounding_functions::combination_score_all_possible_trie_paths, CombinationSearch,
 };
-use wordhunt_solver::letter::Letter;
-use wordhunt_solver::letter_combination::LetterCombination;
-use wordhunt_solver::utilities::{create_trie, ALL_A_FREQUENCIES};
+use wordhunt_solver::utilities::create_trie;
+use wordhunt_solver::utilities::snapshot_utilities::read_next_progress_information_from_directory;
 
 fn main() {
     let args: Vec<String> = env::args().collect();
 
-    if args.len() != 2 {
-        panic!("Please enter only one argument - the relative filepath of the word list.");
-    }
+    let progress_information = match args.len() {
+	2 => {
+	    None
+	}
+	3 => {
+	    let snapshots_directory = &args[2];
+	    match read_next_progress_information_from_directory(snapshots_directory) {
+		Ok((snapshot_num, read_progress_information)) => {
+		    println!("finished reading progress information from snapshot {} in directory {}", snapshot_num, snapshots_directory);
+		    Some(read_progress_information)
+		}
+		Err(msg) => panic!("could not read ProgressInformation from {} due to {}", snapshots_directory, msg)
+	    }
+	}
+	n => panic!("usage is path/to/wordlist [/path/to/snapshots/directory] but you provided {} arguments", n - 1),
+    };
 
-    // read words into trie
-    let file_path: &str = &args[1];
-    println!("Reading words from {} into word trie.", file_path);
-    let (trie, word_count) = create_trie(file_path);
+    // read wordlist into trie
+    let trie_file_path: &str = &args[1];
+    println!("reading words from {} into word trie.", trie_file_path);
+    let (trie, word_count) = create_trie(trie_file_path);
     println!(
-        "Finished creating word trie containing {} words.",
+        "finished creating word trie containing {} words.",
         word_count
     );
 
-    let all_a_combination = LetterCombination::new(ALL_A_FREQUENCIES);
+    let combination_terminator: Arc<Mutex<bool>> = Arc::new(Mutex::new(false));
+    let combination_terminator_ref = combination_terminator.clone();
+    ctrlc::set_handler(move || *combination_terminator_ref.lock().unwrap() = true)
+        .expect("FAILED TO SET CTRL-C HANDLER");
 
     let combination_evaluator = CombinationSearch::new(
         &trie,
-        all_a_combination,
         combination_score_all_possible_trie_paths,
         1640,
         std::thread::available_parallelism().unwrap().get(),
+        combination_terminator,
     );
-    combination_evaluator.evaluate_combinations(120);
+
+    const SECS_PER_HOUR: u64 = 3600;
+    const SNAPSHOT_FREQUENCY: u64 = 12 * SECS_PER_HOUR;
+
+    let combination_generator_creator = SequentialLetterCombinationGenerator::new;
+    combination_evaluator.evaluate_combinations(
+        SNAPSHOT_FREQUENCY,
+        progress_information,
+        combination_generator_creator,
+    );
 
     // temporary test grid from https://www.youtube.com/watch?v=3cgr_GgA5ns
     /*    let test_board_chars = ['M', 'H', 'O', 'N', 'I', 'T', 'E', 'R', 'L', 'A', 'S', 'N', 'S', 'E', 'R', 'U'];

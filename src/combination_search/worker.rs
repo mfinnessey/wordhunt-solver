@@ -19,7 +19,7 @@ pub struct WorkerInformation<'a> {
     global: Arc<Injector<LetterCombination>>,
     stealers: Arc<Vec<Stealer<LetterCombination>>>,
     /// where the worker stores its passing combinations for a given batch (to eventually be snapshotted by the generator thread)
-    pass_vector: Arc<Mutex<Vec<PassMsg>>>,
+    pass_vector: Arc<Mutex<Option<Vec<PassMsg>>>>,
     /// synchronization stuff
     /// all combinations have been generated - the condition that will ultimately terminate each thread
     all_combinations_generated: Arc<RwLock<bool>>,
@@ -40,6 +40,8 @@ pub struct WorkerInformation<'a> {
     num_active_workers: Arc<Mutex<usize>>,
     /// set by the snapshot thread to notify the worker threads that the snapshot has been completed
     snapshot_complete: Arc<(Mutex<bool>, Condvar)>,
+    /// set if aborting early (e.g. for ctrl-c)
+    aborting_early: Arc<RwLock<bool>>,
 }
 
 impl<'a> WorkerInformation<'a> {
@@ -52,7 +54,7 @@ impl<'a> WorkerInformation<'a> {
         local: Worker<LetterCombination>,
         global: Arc<Injector<LetterCombination>>,
         stealers: Arc<Vec<Stealer<LetterCombination>>>,
-        pass_vector: Arc<Mutex<Vec<PassMsg>>>,
+        pass_vector: Arc<Mutex<Option<Vec<PassMsg>>>>,
         all_combinations_generated: Arc<RwLock<bool>>,
         stop_for_snapshot: &'a AtomicBool,
         generator_thread_stopped: Arc<RwLock<bool>>,
@@ -60,6 +62,7 @@ impl<'a> WorkerInformation<'a> {
         num_running_workers: Arc<Mutex<usize>>,
         num_active_workers: Arc<Mutex<usize>>,
         snapshot_complete: Arc<(Mutex<bool>, Condvar)>,
+        aborting_early: Arc<RwLock<bool>>,
     ) -> Self {
         Self {
             word_list,
@@ -76,6 +79,7 @@ impl<'a> WorkerInformation<'a> {
             num_running_workers,
             num_active_workers,
             snapshot_complete,
+            aborting_early,
         }
     }
 }
@@ -96,6 +100,7 @@ pub fn evaluate_combinations(worker_information: WorkerInformation) {
     let num_running_workers = worker_information.num_running_workers;
     let num_active_workers = worker_information.num_active_workers;
     let snapshot_complete = worker_information.snapshot_complete;
+    let aborting_early = worker_information.aborting_early;
 
     let mut passed_local = Vec::new();
 
@@ -129,7 +134,7 @@ pub fn evaluate_combinations(worker_information: WorkerInformation) {
                 // nothing remaining period - we're done!
                 if *all_combinations_generated.read().unwrap() {
                     // move the local passed vector to the shared vector
-                    *pass_vector.lock().unwrap() = passed_local;
+                    *pass_vector.lock().unwrap() = Some(passed_local);
 
                     // it's possible for all_combinations_generated to be set after some workers have stopped
                     // for a snapshot but not all, so we need to be compatible with the normal start / stop
@@ -145,18 +150,25 @@ pub fn evaluate_combinations(worker_information: WorkerInformation) {
                         if *running_worker_count == 1 {
                             notify_snapshot_thread_all_workers_stopped(&workers_stopped);
                         }
+
+                        println!(
+                            "worker thread {} stopped with {} running {} active",
+                            thread::current().name().unwrap_or("unnamed"),
+                            *running_worker_count,
+                            *num_active_workers.lock().unwrap()
+                        );
                     }
 
                     // we need not wait to be restarted - we're done!
 
                     // check invariant (local queue empty at thread termination)
                     if !local.is_empty() {
-                        panic!("Local queue on thread {} was not empty ({} combination(s)) at end of snapshot.",
+                        panic!("local queue on worker thread {} was not empty ({} combination(s)) at end of snapshot.",
 			       thread::current().name().unwrap_or("unnamed"), local.len())
                     }
 
                     println!(
-                        "thread {} completed execution",
+                        "worker thread {} completed execution",
                         thread::current().name().unwrap_or("unnamed")
                     );
 
@@ -168,6 +180,7 @@ pub fn evaluate_combinations(worker_information: WorkerInformation) {
                     let mut is_last_worker = false;
                     let mut can_stop_for_snapshot = false;
                     {
+                        // TODO consider just not letting any workers stop until the generator is stopped
                         let mut running_worker_count = num_running_workers.lock().unwrap();
                         // this is the last worker thread stopping - verify that the generator has already stopped
                         if *running_worker_count == 1 {
@@ -175,7 +188,7 @@ pub fn evaluate_combinations(worker_information: WorkerInformation) {
                             let generator_stopped = generator_thread_stopped.read().unwrap();
                             if *generator_stopped {
                                 can_stop_for_snapshot = true;
-				*running_worker_count -= 1;
+                                *running_worker_count -= 1;
                             }
                             // don't allow stopping if we were to be the last worker thread to stop
                             // but the global thread has not stopped yet (busy wait)
@@ -191,12 +204,12 @@ pub fn evaluate_combinations(worker_information: WorkerInformation) {
 
                     if can_stop_for_snapshot {
                         // move the local passed vector to the shared vector
-                        *pass_vector.lock().unwrap() = passed_local;
+                        *pass_vector.lock().unwrap() = Some(passed_local);
                         passed_local = Vec::new();
 
                         // check snapshot invariant (queues empty)
                         if !local.is_empty() {
-                            panic!("Local queue on thread {} was not empty ({} combination(s)) at end of snapshot.",
+                            panic!("local queue on worker thread {} was not empty ({} combination(s)) at end of snapshot.",
 			    thread::current().name().unwrap_or("unnamed"), local.len())
                         }
 
@@ -205,7 +218,7 @@ pub fn evaluate_combinations(worker_information: WorkerInformation) {
                         }
 
                         println!(
-                            "thread {} stopped for snapshot",
+                            "worker thread {} stopped for snapshot",
                             thread::current().name().unwrap_or("unnamed")
                         );
 
@@ -218,16 +231,24 @@ pub fn evaluate_combinations(worker_information: WorkerInformation) {
                                 .unwrap();
                         }
 
+                        if *aborting_early.read().unwrap() {
+                            println!(
+                                "worker thread {} aborting early",
+                                thread::current().name().unwrap_or("unnamed")
+                            );
+                            return;
+                        }
+
                         *num_running_workers.lock().unwrap() += 1;
                         println!(
-                            "thread {} restarted after snapshot",
+                            "worker thread {} restarted after snapshot",
                             thread::current().name().unwrap_or("unnamed")
                         );
                     }
                 }
                 // queues are dry, but no snapshot has been triggered - workers are running ahead of the generator
                 else {
-                    println!("All queues are dry but not all letter combinations are exhausted. Sleeping.");
+                    println!("all queues are dry but not all letter combinations are exhausted - sleeping.");
                     thread::sleep(time::Duration::from_secs(1));
                 }
             }

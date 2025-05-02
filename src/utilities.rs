@@ -3,6 +3,7 @@ use std::fs::File;
 use std::io::{self, BufRead};
 use trie_rs::{Trie, TrieBuilder};
 
+pub mod snapshot_utilities;
 pub mod test_utilities;
 
 /// point values for word lengths from 0 to 16 (removing the factor of 100)

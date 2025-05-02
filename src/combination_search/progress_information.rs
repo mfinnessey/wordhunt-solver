@@ -1,38 +1,58 @@
 use crate::letter_combination::LetterCombination;
 use serde::{Deserialize, Serialize};
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
 pub const PROGRESS_SNAPSHOT_IDENTIFIER: &str = "PROGRESS";
-#[derive(Serialize, Deserialize, Eq, PartialEq, Debug)]
+#[derive(Serialize, Deserialize, Eq, PartialEq, Debug, Clone)]
 pub struct ProgressInformation {
+    start_time: SystemTime,
     last_update_time: SystemTime,
     total_elapsed_time: Duration,
     pass_count: u64,
     evaluated_count: u64,
-    next_combination: LetterCombination,
+    next_combination: Option<LetterCombination>,
     snapshot_num: u32,
+    snapshots_directory: PathBuf,
 }
 
 impl ProgressInformation {
     pub fn new(start_time: SystemTime, next_combination: LetterCombination) -> Self {
+        // create the snapshots directory
+        let secs_since_unix_epoch = start_time
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .as_secs()
+            .to_string();
+        let path_string = "snapshots-".to_string() + &secs_since_unix_epoch;
+        let snapshots_directory = Path::new(&path_string);
+        match fs::create_dir(snapshots_directory) {
+            Ok(_) => (),
+            Err(_) => panic!("could not create snapshots directory"),
+        }
+
         Self {
+            start_time,
             last_update_time: start_time,
             pass_count: 0,
             total_elapsed_time: Duration::ZERO,
             evaluated_count: 0,
-            next_combination,
+            next_combination: Some(next_combination),
             snapshot_num: 0,
+            snapshots_directory: snapshots_directory.to_path_buf(),
         }
+    }
+
+    pub fn mark_batch_start(&mut self) {
+        self.last_update_time = SystemTime::now();
     }
 
     pub fn update_with_batch(
         &mut self,
         batch_pass_count: u64,
         batch_evaluated_count: u64,
-        next_combination: &LetterCombination,
-        snapshot_num: u32,
+        next_combination: Option<&LetterCombination>,
         mut snapshots_directory: PathBuf,
         print_statistics: bool,
     ) {
@@ -47,12 +67,12 @@ impl ProgressInformation {
         self.total_elapsed_time += batch_elapsed_time;
         self.pass_count += batch_pass_count;
         self.evaluated_count += batch_evaluated_count;
-        self.next_combination = *next_combination;
-        self.snapshot_num = snapshot_num;
+        self.next_combination = next_combination.copied();
 
         // dump state to disk
         let encoded_progress_information = bincode::serialize(&self).unwrap();
-        let progress_information_name = snapshot_num.to_string() + PROGRESS_SNAPSHOT_IDENTIFIER;
+        let progress_information_name =
+            self.snapshot_num.to_string() + PROGRESS_SNAPSHOT_IDENTIFIER;
         snapshots_directory.push(progress_information_name);
         fs::write(snapshots_directory, encoded_progress_information).unwrap();
 
@@ -90,6 +110,7 @@ impl ProgressInformation {
         let overall_combinations_per_hour =
             (self.evaluated_count as f64) / (overall_elapsed_time_hours);
 
+        // TODO compute this...
         const TOTAL_COMBINATIONS_COUNT: u64 = 103_077_446_706;
         let remaining_combinations_count = TOTAL_COMBINATIONS_COUNT - self.evaluated_count;
         let remaining_combinations_percentage: f64 =
@@ -124,7 +145,35 @@ impl ProgressInformation {
             "Ran for {:.1} hours. Estimate {:.1} hours remaining",
             overall_elapsed_time_hours, estimated_time_remaining_hours
         );
-        println!("Next combination is: {}.", next_combination);
+        match next_combination {
+            Some(combination) => println!("next combination is: {}.", combination),
+            None => println!("no next combination (all combinations evaluated)"),
+        }
+
         println!("*****");
+    }
+
+    pub fn get_next_combination(&self) -> Option<LetterCombination> {
+        self.next_combination
+    }
+
+    pub fn get_start_time(&self) -> &SystemTime {
+        &self.start_time
+    }
+
+    pub fn get_evaluated_count(&self) -> &u64 {
+        &self.evaluated_count
+    }
+
+    pub fn get_snapshots_directory(&self) -> &PathBuf {
+        &self.snapshots_directory
+    }
+
+    pub fn get_snapshot_number(&self) -> u32 {
+        self.snapshot_num
+    }
+
+    pub fn bump_snapshot_number(&mut self) {
+        self.snapshot_num += 1;
     }
 }

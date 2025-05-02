@@ -15,7 +15,8 @@ pub fn generate_combinations(
     stop_for_snapshot: &AtomicBool,
     generator_thread_stopped: Arc<RwLock<bool>>,
     snapshot_complete: Arc<(Mutex<bool>, Condvar)>,
-    next_combination: Arc<Mutex<LetterCombination>>,
+    aborting_early: Arc<RwLock<bool>>,
+    next_combination: Arc<Mutex<Option<LetterCombination>>>,
     batch_count: Arc<Mutex<u64>>,
 ) {
     let mut local_batch_count: u64 = 0;
@@ -43,7 +44,7 @@ pub fn generate_combinations(
         // predicted efficiently enough)
         if stop_for_snapshot.load(MemoryOrdering::SeqCst) {
             // write state that the snapshot thread needs
-            *next_combination.lock().unwrap() = combination;
+            *next_combination.lock().unwrap() = Some(combination);
             *batch_count.lock().unwrap() = local_batch_count;
 
             // notify worker threads that we have stopped generating new combinations
@@ -69,6 +70,11 @@ pub fn generate_combinations(
                 snapshot_completed_check = condvar.wait(snapshot_completed_check).unwrap();
             }
 
+            if *aborting_early.read().unwrap() {
+                println!("generator thread detected early abort");
+                return;
+            }
+
             *snapshot_completed_check = false;
             println!("Generator thread resuming after snapshot.");
 
@@ -84,9 +90,9 @@ pub fn generate_combinations(
         local_batch_count += 1;
     }
 
-    println!("Generated all combinations");
     *batch_count.lock().unwrap() = local_batch_count;
-    // next_combination will be garbage, but that's fine as we've already thrown all the combinations to the queue
+    *next_combination.lock().unwrap() = None;
     *generator_thread_stopped.write().unwrap() = true;
     *all_combinations_generated.write().unwrap() = true;
+    println!("generated all combinations");
 }
