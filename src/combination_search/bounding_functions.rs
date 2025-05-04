@@ -68,6 +68,36 @@ pub fn combination_score_all_possible_trie_paths(
     score
 }
 
+/// get the summed scores of all words of length <= 16
+/// that can be built from a given combination of 16 letters represented
+/// as frequency counts
+// this is an upper bound on the score of any board that is a permutation of these letters
+// this bound ignores all placement considerations.
+pub fn combination_score_all_possible_words(
+    word_list: &Vec<[u8; ALPHABET_LENGTH]>,
+    letter_frequencies: LetterCombination,
+) -> u32 {
+    let mut score = 0;
+
+    for word_freqs in word_list.iter() {
+        let mut fits = true;
+        for (word_freq, ref letter_freq) in word_freqs
+            .iter()
+            .zip(<[u8; ALPHABET_LENGTH]>::from(letter_frequencies))
+        {
+            if word_freq > letter_freq {
+                fits = false;
+                break;
+            }
+        }
+        if fits {
+            score += 1;
+        }
+    }
+
+    score
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
