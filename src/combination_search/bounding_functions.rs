@@ -166,4 +166,42 @@ mod tests {
             AZ_POINTS
         );
     }
+
+    #[test]
+    fn test_combination_score_all_possible_words() {
+        // test from first principles - measure the points that should be scored against
+        // an artifical word list
+        let mut expected_points = 0;
+        const FREQS: [u8; ALPHABET_LENGTH] = [
+            2, 1, 1, 0, 0, 0, 0, 11, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1,
+        ];
+
+        // maximal fit
+        let fits_16 = FREQS;
+        expected_points += POINTS[16];
+
+        // this should fit but score no points
+        let fits_1 = [
+            0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        ];
+        expected_points += POINTS[1];
+
+        // this should fit and score some points
+        let fits_3 = [
+            1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1,
+        ];
+        expected_points += POINTS[3];
+
+        // this shouldn't fit (and should score no points)
+        let no_fit = [
+            3, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1,
+        ];
+
+        let word_list = vec![fits_16, fits_1, fits_3, no_fit];
+
+        assert_eq!(
+            expected_points,
+            combination_score_all_possible_words(&word_list, FREQS.into())
+        );
+    }
 }
