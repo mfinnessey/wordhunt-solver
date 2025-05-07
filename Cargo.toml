@@ -26,3 +26,8 @@ trie-rs = "0.4.2"
 
 [dev-dependencies]
 cargo-llvm-cov = "0.6.16"
+criterion = { version = "0.4", features = ["html_reports"]}
+
+[[bench]]
+name = "stage1_evaluation_benchmark"
+harness = false

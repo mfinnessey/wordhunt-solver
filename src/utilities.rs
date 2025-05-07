@@ -1,4 +1,5 @@
 use crate::letter::{translate_word, Letter};
+use crate::letter_combination::LetterCombination;
 use std::fs::File;
 use std::io::{self, BufRead};
 use trie_rs::{Trie, TrieBuilder};
@@ -65,6 +66,34 @@ pub fn create_trie(word_list_file_path: &str) -> (Trie<Letter>, u32) {
         (builder.build(), word_count)
     } else {
         panic!("Could not open specified file!");
+    }
+}
+
+/// create a trie from the given wordlist filepath
+pub fn create_word_vector(word_list_file_path: &str) -> (Vec<[u8; ALPHABET_LENGTH]>, u32) {
+    let mut results = Vec::new();
+    // read from file
+    if let Ok(file) = File::open(word_list_file_path) {
+        let lines = io::BufReader::new(file).lines();
+
+        // build up the vector
+        for line in lines.map_while(Result::ok) {
+            match translate_word(&line) {
+                Ok(word) => {
+		    let mut freqs = [0; ALPHABET_LENGTH];
+		    for letter in word {
+			freqs[letter as usize] += 1;
+		    }
+                    results.push(freqs);
+                }
+                // fail brutally with invalid word-lists
+                Err(e) => panic!("unable to process word {} because {e:?}", line),
+            }
+        }
+	let len: u32 = results.len().try_into().expect("word list too long - are you using a correct word list?");
+        (results, len)
+    } else {
+        panic!("could not open specified file!");
     }
 }
 

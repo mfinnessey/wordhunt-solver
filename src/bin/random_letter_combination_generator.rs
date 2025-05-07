@@ -6,7 +6,7 @@ use wordhunt_solver::utilities::{ALPHABET_LENGTH, TILE_COUNT};
 
 fn main() {
     /// number of combinations to generate
-    const COMBINATIONS_COUNT: usize = 10_000_000;
+    const COMBINATIONS_COUNT: usize = 1000;
 
     let mut combinations = HashSet::new();
 

@@ -77,7 +77,7 @@ pub fn combination_score_all_possible_words(
     word_list: &Vec<[u8; ALPHABET_LENGTH]>,
     letter_frequencies: LetterCombination,
 ) -> u32 {
-    let mut score = 0;
+    let mut score: u32 = 0;
 
     for word_freqs in word_list.iter() {
         let mut fits = true;
@@ -91,7 +91,7 @@ pub fn combination_score_all_possible_words(
             }
         }
         if fits {
-            score += 1;
+            score += &POINTS[word_freqs.iter().sum::<u8>() as usize];
         }
     }
 
