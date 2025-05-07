@@ -1,5 +1,4 @@
 use crate::letter::{translate_word, Letter};
-use crate::letter_combination::LetterCombination;
 use std::fs::File;
 use std::io::{self, BufRead};
 use trie_rs::{Trie, TrieBuilder};
@@ -105,10 +104,13 @@ mod tests {
     use super::*;
     use std::collections::HashSet;
 
+    const WORDLIST_FILE_PATH: &str = "tests/wordlist.txt";
+    const INVALID_WORDLIST_FILEPATH: &str = "tests/invalid_wordlist.txt";
+    const DNE_FILE_PATH: &str = "tests/DNE";
+
     #[test]
     fn test_create_trie() {
-        const TEST_TRIE_FILE_PATH: &str = "tests/test_trie.txt";
-        let (trie, word_count) = create_trie(TEST_TRIE_FILE_PATH);
+        let (trie, word_count) = create_trie(WORDLIST_FILE_PATH);
 
         assert_eq!(word_count, 3);
 
@@ -129,14 +131,52 @@ mod tests {
         expected = "Unable to process word 1 because \"Could not decode character. Only uppercase English letters are accepted.\""
     )]
     fn test_create_trie_invalid_word() {
-        const TEST_TRIE_FAIL_FILE_PATH: &str = "tests/test_trie_fail.txt";
-        create_trie(TEST_TRIE_FAIL_FILE_PATH);
+        create_trie(INVALID_WORDLIST_FILEPATH);
     }
 
     #[test]
     #[should_panic(expected = "Could not open specified file!")]
     fn test_create_trie_file_dne() {
-        const DNE_FILE_PATH: &str = "tests/DNE";
         create_trie(DNE_FILE_PATH);
+    }
+
+    #[test]
+    fn test_create_word_vector() {
+        let (word_vector, word_count) = create_word_vector(WORDLIST_FILE_PATH);
+
+        assert_eq!(word_count, 3);
+
+        // hardcode expected vector contents - there is a risk of erroneous divergence
+        // here, but we avoid the risk of replicating errors in I/O.
+        // words are ["ALPHABET", "CAROLINA", "ZOOLOGICAL"]
+        // translated to frequencies by hand
+        let expected_vec: Vec<[u8; ALPHABET_LENGTH]> = vec![
+            [
+                2, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0,
+            ],
+            [
+                2, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 1, 0, 1, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0,
+            ],
+            [
+                1, 0, 1, 0, 0, 0, 1, 0, 1, 0, 0, 2, 0, 0, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1,
+            ],
+        ];
+
+        assert_eq!(expected_vec, word_vector);
+    }
+
+    #[test]
+    #[should_panic(
+        expected = "unable to process word 1 because \"Could not decode character. Only uppercase English letters are accepted.\""
+    )]
+    fn test_create_word_vector_invalid_word() {
+        create_word_vector(INVALID_WORDLIST_FILEPATH);
+    }
+
+    #[test]
+    #[should_panic(expected = "could not open specified file!")]
+    fn test_create_word_vector_file_dne() {
+        const DNE_FILE_PATH: &str = "tests/DNE";
+        create_word_vector(DNE_FILE_PATH);
     }
 }

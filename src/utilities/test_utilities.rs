@@ -1,3 +1,5 @@
+use crate::letter_combination::LetterCombination;
+use std::fs::read;
 use std::fs::remove_dir_all;
 use std::path::Path;
 
@@ -22,4 +24,10 @@ impl<P: AsRef<Path>> Drop for TestCleanup<P> {
             remove_dir_all(dir).unwrap();
         }
     }
+}
+
+/// used for reading test combinations from disk
+pub fn read_random_combinations(combinations_file_path: &str) -> Vec<LetterCombination> {
+    let data = read(combinations_file_path).expect("could not read specified combinations file");
+    bincode::deserialize(&data).expect("combination list was not in the expected path")
 }

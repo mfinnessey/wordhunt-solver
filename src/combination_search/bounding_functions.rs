@@ -102,7 +102,8 @@ pub fn combination_score_all_possible_words(
 mod tests {
     use super::*;
     use crate::letter::translate_word;
-    use crate::utilities::ALL_A_FREQUENCIES;
+    use crate::utilities::test_utilities::read_random_combinations;
+    use crate::utilities::{create_trie, create_word_vector, ALL_A_FREQUENCIES, ALPHABET_LENGTH};
     use trie_rs::TrieBuilder;
 
     #[test]
@@ -203,5 +204,22 @@ mod tests {
             expected_points,
             combination_score_all_possible_words(&word_list, FREQS.into())
         );
+    }
+
+    #[test]
+    fn test_return_same_result() {
+        const WORDLIST_FILENAME: &str = "wordlist-actual.txt";
+        let combinations: Vec<LetterCombination> =
+            read_random_combinations("tests/test_letter_combinations");
+
+        let trie = create_trie(WORDLIST_FILENAME);
+        let word_vector = create_word_vector(WORDLIST_FILENAME);
+
+        for combination in combinations {
+            assert_eq!(
+                combination_score_all_possible_trie_paths(&trie.0, combination),
+                combination_score_all_possible_words(&word_vector.0, combination)
+            )
+        }
     }
 }
