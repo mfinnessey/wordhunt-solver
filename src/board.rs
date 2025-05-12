@@ -154,7 +154,7 @@ impl<'a> Board<'a> {
 
         // a word can only score once per board
         if self.words.insert(word) {
-            self.score += POINTS[word_len];
+            self.score += <u8 as Into<u32>>::into(POINTS[word_len]);
         }
     }
 }
@@ -178,7 +178,6 @@ mod tests {
     use super::*;
     use crate::letter::translate_word;
     use crate::utilities::create_trie;
-    use std::collections::HashMap;
 
     #[test]
     fn test_maximum_score() {
@@ -232,7 +231,7 @@ mod tests {
 
         let expected_score_1: u32 = SOLUTION_WORDS_1
             .iter()
-            .map(|word| POINTS[word.chars().count()])
+            .map(|word| POINTS[word.chars().count()] as u32)
             .sum();
         let expected_words_1 = HashSet::from_iter(
             SOLUTION_WORDS_1
@@ -297,7 +296,7 @@ mod tests {
 
         let expected_score_2: u32 = SOLUTION_WORDS_2
             .iter()
-            .map(|word| POINTS[word.chars().count()])
+            .map(|word| POINTS[word.chars().count()] as u32)
             .sum();
         let expected_words_2 = HashSet::from_iter(
             SOLUTION_WORDS_2

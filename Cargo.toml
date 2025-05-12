@@ -31,3 +31,8 @@ criterion = { version = "0.4", features = ["html_reports"]}
 [[bench]]
 name = "stage1_evaluation_benchmark"
 harness = false
+
+[[bench]]
+name = "stage1_vector_bench"
+harness = false
+

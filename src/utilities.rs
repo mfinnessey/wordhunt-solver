@@ -7,7 +7,7 @@ pub mod snapshot_utilities;
 pub mod test_utilities;
 
 /// point values for word lengths from 0 to 16 (removing the factor of 100)
-pub const POINTS: [u32; 17] = [0, 0, 0, 1, 4, 8, 14, 18, 22, 26, 30, 34, 38, 42, 46, 50, 54];
+pub const POINTS: [u8; 17] = [0, 0, 0, 1, 4, 8, 14, 18, 22, 26, 30, 34, 38, 42, 46, 50, 54];
 
 pub const TILE_COUNT: usize = 16;
 
@@ -84,6 +84,39 @@ pub fn create_word_vector(word_list_file_path: &str) -> (Vec<[u8; ALPHABET_LENGT
                         freqs[letter as usize] += 1;
                     }
                     results.push(freqs);
+                }
+                // fail brutally with invalid word-lists
+                Err(e) => panic!("unable to process word {} because {e:?}", line),
+            }
+        }
+        let len: u32 = results
+            .len()
+            .try_into()
+            .expect("word list too long - are you using a correct word list?");
+        (results, len)
+    } else {
+        panic!("could not open specified file!");
+    }
+}
+
+/// create a trie from the given wordlist filepath
+pub fn create_word_vector_with_scores(
+    word_list_file_path: &str,
+) -> (Vec<([u8; ALPHABET_LENGTH], u8)>, u32) {
+    let mut results = Vec::new();
+    // read from file
+    if let Ok(file) = File::open(word_list_file_path) {
+        let lines = io::BufReader::new(file).lines();
+
+        // build up the vector
+        for line in lines.map_while(Result::ok) {
+            match translate_word(&line) {
+                Ok(word) => {
+                    let mut freqs = [0; ALPHABET_LENGTH];
+                    for letter in word {
+                        freqs[letter as usize] += 1;
+                    }
+                    results.push((freqs, POINTS[freqs.iter().sum::<u8>() as usize]));
                 }
                 // fail brutally with invalid word-lists
                 Err(e) => panic!("unable to process word {} because {e:?}", line),
@@ -178,5 +211,56 @@ mod tests {
     fn test_create_word_vector_file_dne() {
         const DNE_FILE_PATH: &str = "tests/DNE";
         create_word_vector(DNE_FILE_PATH);
+    }
+
+    #[test]
+    fn test_create_word_vector_with_scores() {
+        let (word_vector_with_scores, word_count) =
+            create_word_vector_with_scores(WORDLIST_FILE_PATH);
+
+        assert_eq!(word_count, 3);
+
+        // hardcode expected vector contents - there is a risk of erroneous divergence
+        // here, but we avoid the risk of replicating errors in I/O.
+        // words are ["ALPHABET", "CAROLINA", "ZOOLOGICAL"]
+        // translated to frequencies by hand
+
+        let expected_vec: Vec<([u8; ALPHABET_LENGTH], u8)> = vec![
+            (
+                [
+                    2, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0,
+                ],
+                POINTS[8],
+            ),
+            (
+                [
+                    2, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 1, 0, 1, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0,
+                ],
+                POINTS[8],
+            ),
+            (
+                [
+                    1, 0, 1, 0, 0, 0, 1, 0, 1, 0, 0, 2, 0, 0, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1,
+                ],
+                POINTS[10],
+            ),
+        ];
+
+        assert_eq!(expected_vec, word_vector_with_scores);
+    }
+
+    #[test]
+    #[should_panic(
+        expected = "unable to process word 1 because \"Could not decode character. Only uppercase English letters are accepted.\""
+    )]
+    fn test_create_word_vector_with_scores_invalid_word() {
+        create_word_vector_with_scores(INVALID_WORDLIST_FILEPATH);
+    }
+
+    #[test]
+    #[should_panic(expected = "could not open specified file!")]
+    fn test_create_word_vector_with_scoresfile_dne() {
+        const DNE_FILE_PATH: &str = "tests/DNE";
+        create_word_vector_with_scores(DNE_FILE_PATH);
     }
 }

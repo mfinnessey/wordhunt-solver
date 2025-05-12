@@ -15,7 +15,7 @@ pub fn combination_score_all_possible_trie_paths(
     letter_frequencies: LetterCombination,
 ) -> u32 {
     // compute score by bfs through trie
-    let mut score = 0;
+    let mut score: u32 = 0;
     let mut queue = VecDeque::new();
     // convert into slice for iteration
     let letter_counts: [u8; ALPHABET_LENGTH] = letter_frequencies.into();
@@ -48,7 +48,7 @@ pub fn combination_score_all_possible_trie_paths(
                     }
                     // score and continuation
                     Some(Answer::PrefixAndMatch) => {
-                        score += POINTS[new_search.prefix_len()];
+                        score += <u8 as Into<u32>>::into(POINTS[new_search.prefix_len()]);
 
                         let mut new_counts = remaining_counts;
                         new_counts[i] -= 1;
@@ -56,7 +56,7 @@ pub fn combination_score_all_possible_trie_paths(
                     }
                     // score only
                     Some(Answer::Match) => {
-                        score += POINTS[new_search.prefix_len()];
+                        score += <u8 as Into<u32>>::into(POINTS[new_search.prefix_len()]);
                     }
                     // no score, no continuation
                     None => (),
@@ -91,7 +91,32 @@ pub fn combination_score_all_possible_words(
             }
         }
         if fits {
-            score += &POINTS[word_freqs.iter().sum::<u8>() as usize];
+            score += &POINTS[word_freqs.iter().sum::<u8>() as usize].into();
+        }
+    }
+
+    score
+}
+
+pub fn combination_score_all_possible_words_with_scores(
+    words: &Vec<([u8; ALPHABET_LENGTH], u8)>,
+    letter_frequencies: LetterCombination,
+) -> u32 {
+    let mut score: u32 = 0;
+
+    for (word_freqs, word_score) in words.iter() {
+        let mut fits = true;
+        for (word_freq, ref letter_freq) in word_freqs
+            .iter()
+            .zip(<[u8; ALPHABET_LENGTH]>::from(letter_frequencies))
+        {
+            if word_freq > letter_freq {
+                fits = false;
+                break;
+            }
+        }
+        if fits {
+            score += *word_score as u32;
         }
     }
 
@@ -103,7 +128,10 @@ mod tests {
     use super::*;
     use crate::letter::translate_word;
     use crate::utilities::test_utilities::read_random_combinations;
-    use crate::utilities::{create_trie, create_word_vector, ALL_A_FREQUENCIES, ALPHABET_LENGTH};
+    use crate::utilities::{
+        create_trie, create_word_vector, create_word_vector_with_scores, ALL_A_FREQUENCIES,
+        ALPHABET_LENGTH,
+    };
     use trie_rs::TrieBuilder;
 
     #[test]
@@ -138,7 +166,7 @@ mod tests {
         let trie = builder.build();
 
         // can score all combination lengths (and don't score insufficiently long words)
-        let all_a_points: u32 = POINTS.iter().sum();
+        let all_a_points: u32 = POINTS.iter().map(|n| *n as u32).sum();
         let all_a_lc = LetterCombination::new(ALL_A_FREQUENCIES);
         assert_eq!(
             combination_score_all_possible_trie_paths(&trie, all_a_lc),
@@ -146,7 +174,7 @@ mod tests {
         );
 
         // should score AAA, AZA, AZC (can take multiple branches from a node) but not AZAZ (exhaust letters)
-        const THREES_POINTS: u32 = 3 * POINTS[3];
+        const THREES_POINTS: u32 = 3 * POINTS[3] as u32;
         const THREES_FREQS: [u8; ALPHABET_LENGTH] = [
             3, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 11, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1,
         ];
@@ -157,7 +185,7 @@ mod tests {
         );
 
         // should score AZA, AZC, and AZACB (use C at different positions, continue past non-scoring nodes)
-        const AZ_POINTS: u32 = 2 * POINTS[3] + POINTS[5];
+        const AZ_POINTS: u32 = (2 * POINTS[3] + POINTS[5]) as u32;
         const AZ_FREQS: [u8; ALPHABET_LENGTH] = [
             2, 1, 1, 0, 0, 0, 0, 11, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1,
         ];
@@ -201,7 +229,7 @@ mod tests {
         let word_list = vec![fits_16, fits_1, fits_3, no_fit];
 
         assert_eq!(
-            expected_points,
+            u32::from(expected_points),
             combination_score_all_possible_words(&word_list, FREQS.into())
         );
     }
@@ -214,12 +242,17 @@ mod tests {
 
         let trie = create_trie(WORDLIST_FILENAME);
         let word_vector = create_word_vector(WORDLIST_FILENAME);
+        let word_vector_with_scores = create_word_vector_with_scores(WORDLIST_FILENAME);
 
         for combination in combinations {
-            assert_eq!(
-                combination_score_all_possible_trie_paths(&trie.0, combination),
-                combination_score_all_possible_words(&word_vector.0, combination)
-            )
+            let score_trie = combination_score_all_possible_trie_paths(&trie.0, combination);
+            let score_vec = combination_score_all_possible_words(&word_vector.0, combination);
+            let score_vec_with_scores = combination_score_all_possible_words_with_scores(
+                &word_vector_with_scores.0,
+                combination,
+            );
+            assert_eq!(score_trie, score_vec);
+            assert_eq!(score_vec, score_vec_with_scores);
         }
     }
 }

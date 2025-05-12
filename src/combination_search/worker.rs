@@ -1,6 +1,7 @@
 use super::{PassMsg, PULL_LIMIT};
 use crate::letter::Letter;
 use crate::letter_combination::LetterCombination;
+use crate::utilities::ALPHABET_LENGTH;
 use std::{iter, thread, time};
 use trie_rs::Trie;
 
@@ -11,8 +12,8 @@ use std::sync::{Arc, Condvar, Mutex, RwLock};
 /// the information that a worker thread is provided with to process combinations
 /// in conjunction with the overall program.
 pub struct WorkerInformation<'a> {
-    word_list: &'a Trie<Letter>,
-    metric: fn(&Trie<Letter>, LetterCombination) -> u32,
+    word_list: &'a Vec<([u8; ALPHABET_LENGTH], u8)>,
+    metric: fn(&Vec<([u8; ALPHABET_LENGTH], u8)>, LetterCombination) -> u32,
     target: u32,
     /// queue accessors
     local: Worker<LetterCombination>,
@@ -48,8 +49,8 @@ impl<'a> WorkerInformation<'a> {
     // this object's constructor is designed to simplify the signature of evaluate_combinations
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        word_list: &'a Trie<Letter>,
-        metric: fn(&Trie<Letter>, LetterCombination) -> u32,
+        word_list: &'a Vec<([u8; ALPHABET_LENGTH], u8)>,
+        metric: fn(&Vec<([u8; ALPHABET_LENGTH], u8)>, LetterCombination) -> u32,
         target: u32,
         local: Worker<LetterCombination>,
         global: Arc<Injector<LetterCombination>>,

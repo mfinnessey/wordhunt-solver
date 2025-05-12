@@ -3,9 +3,9 @@ use std::sync::{Arc, Mutex};
 
 use wordhunt_solver::combination_search::combination_generator::SequentialLetterCombinationGenerator;
 use wordhunt_solver::combination_search::{
-    bounding_functions::combination_score_all_possible_trie_paths, CombinationSearch,
+    bounding_functions::combination_score_all_possible_words_with_scores, CombinationSearch,
 };
-use wordhunt_solver::utilities::create_trie;
+use wordhunt_solver::utilities::create_word_vector_with_scores;
 use wordhunt_solver::utilities::snapshot_utilities::read_next_progress_information_from_directory;
 
 fn main() {
@@ -29,9 +29,9 @@ fn main() {
     };
 
     // read wordlist into trie
-    let trie_file_path: &str = &args[1];
-    println!("reading words from {} into word trie.", trie_file_path);
-    let (trie, word_count) = create_trie(trie_file_path);
+    let word_list_filepath: &str = &args[1];
+    println!("reading words from {} into word trie.", word_list_filepath);
+    let (word_vector_with_scores, word_count) = create_word_vector_with_scores(word_list_filepath);
     println!(
         "finished creating word trie containing {} words.",
         word_count
@@ -43,8 +43,8 @@ fn main() {
         .expect("FAILED TO SET CTRL-C HANDLER");
 
     let combination_evaluator = CombinationSearch::new(
-        &trie,
-        combination_score_all_possible_trie_paths,
+        &word_vector_with_scores,
+        combination_score_all_possible_words_with_scores,
         1640,
         std::thread::available_parallelism().unwrap().get(),
         combination_terminator,

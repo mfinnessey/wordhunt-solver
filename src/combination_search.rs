@@ -1,14 +1,12 @@
 use crate::combination_search::progress_information::ProgressInformation;
-use crate::letter::Letter;
 use crate::letter_combination::LetterCombination;
-use crate::utilities::ALL_A_FREQUENCIES;
+use crate::utilities::{ALL_A_FREQUENCIES, ALPHABET_LENGTH};
 
 use generator::generate_combinations;
 use snapshot::take_snapshots;
 use std::path::PathBuf;
 use std::time::SystemTime;
 use std::{thread, time};
-use trie_rs::Trie;
 use worker::{evaluate_combinations, WorkerInformation};
 
 use crossbeam::thread::ScopedJoinHandle;
@@ -37,10 +35,10 @@ pub type PassMsg = (LetterCombination, u32);
 
 /// evaluates all combinations of letters using a given wordlist using a given metric
 pub struct CombinationSearch<'a> {
-    word_list: &'a Trie<Letter>,
+    word_list: &'a Vec<([u8; ALPHABET_LENGTH], u8)>,
     /// retain the score instead of simply a pass/fail bool so that we can eliminate combinations
     /// based off of lower bounds from stage 2
-    metric: fn(&Trie<Letter>, LetterCombination) -> u32,
+    metric: fn(&Vec<([u8; ALPHABET_LENGTH], u8)>, LetterCombination) -> u32,
     target: u32,
     num_worker_threads: usize,
     /// set by some outside mechanism (generally a signal handler) to cleanly terminate the
@@ -240,8 +238,8 @@ impl<'a> CombinationSearch<'a> {
 /// implementation for raw stage 1 search
 impl<'a> CombinationSearch<'a> {
     pub fn new(
-        word_list: &'a Trie<Letter>,
-        metric: fn(&Trie<Letter>, LetterCombination) -> u32,
+        word_list: &'a Vec<([u8; ALPHABET_LENGTH], u8)>,
+        metric: fn(&Vec<([u8; ALPHABET_LENGTH], u8)>, LetterCombination) -> u32,
         target: u32,
         num_worker_threads: usize,
         terminator: Arc<Mutex<bool>>,
@@ -296,7 +294,7 @@ mod tests {
         const TARGET_A_COUNT: u32 = 10;
         const SNAPSHOT_FREQUENCY_SECS: u64 = 30;
 
-        let dummy_trie = trie_rs::TrieBuilder::new().build();
+        let dummy_vec = Vec::new();
         let unused_fake_combination_generator = FakeLetterCombinationGenerator::new(
             LetterCombination::new(ALL_A_FREQUENCIES),
             COMBINATION_COUNT,
@@ -308,7 +306,7 @@ mod tests {
 
         let terminator = Arc::new(Mutex::new(false));
         let fcs: CombinationSearch = CombinationSearch::new(
-            &dummy_trie,
+            &dummy_vec,
             count_letter_a,
             TARGET_A_COUNT,
             num_workers,
@@ -347,7 +345,7 @@ mod tests {
 
         // second part of search
         let fcs2 = CombinationSearch::new(
-            &dummy_trie,
+            &dummy_vec,
             count_letter_a,
             TARGET_A_COUNT,
             num_workers,
@@ -379,7 +377,7 @@ mod tests {
 
         // second part of search
         let fcs3 = CombinationSearch::new(
-            &dummy_trie,
+            &dummy_vec,
             count_letter_a,
             TARGET_A_COUNT,
             num_workers,
@@ -401,7 +399,7 @@ mod tests {
 
         let expected: HashMap<PassMsg, usize> = unused_fake_combination_generator
             .filter_map(|x| {
-                let actual_count = count_letter_a(&dummy_trie, x);
+                let actual_count = count_letter_a(&dummy_vec, x);
                 if actual_count >= TARGET_A_COUNT {
                     Some((x, actual_count))
                 } else {
@@ -438,7 +436,7 @@ mod tests {
         snapshot_frequency_secs: u64,
         target_a_count: u32,
     ) {
-        let dummy_trie = trie_rs::TrieBuilder::new().build();
+        let dummy_vec = Vec::new();
         let fake_combination_generator_closure =
             |lc: LetterCombination| FakeLetterCombinationGenerator::new(lc, combination_count);
         let fake_combination_generator_unused = FakeLetterCombinationGenerator::new(
@@ -451,7 +449,7 @@ mod tests {
         );
 
         let fcs: CombinationSearch = CombinationSearch::new(
-            &dummy_trie,
+            &dummy_vec,
             count_letter_a,
             target_a_count,
             num_workers,
@@ -467,7 +465,7 @@ mod tests {
 
         let expected: HashMap<PassMsg, usize> = fake_combination_generator_unused
             .filter_map(|x| {
-                let actual_count = count_letter_a(&dummy_trie, x);
+                let actual_count = count_letter_a(&dummy_vec, x);
                 if actual_count >= target_a_count {
                     Some((x, actual_count))
                 } else {
@@ -491,7 +489,10 @@ mod tests {
     }
 
     /// count the number of a's in the combination as an arbitrary, verifiable metric
-    fn count_letter_a(_word_list: &Trie<Letter>, combination: LetterCombination) -> u32 {
+    fn count_letter_a(
+        _word_list: &Vec<([u8; ALPHABET_LENGTH], u8)>,
+        combination: LetterCombination,
+    ) -> u32 {
         // use the last u8's  high for the range to make
         // the signature still match. a fun lil testing hack!
         let high: u32 = (max(1, combination[25]) as u32) * 1_000;
