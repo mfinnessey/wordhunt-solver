@@ -13,6 +13,9 @@ pub const TILE_COUNT: usize = 16;
 
 pub const ALPHABET_LENGTH: usize = 26;
 
+/// number of letter combinations to evaluate at once
+pub const BATCH_SIZE: usize = 500;
+
 /// the starting value of the iterator over all letter combinations
 pub const ALL_A_FREQUENCIES: [u8; ALPHABET_LENGTH] = [
     TILE_COUNT as u8,

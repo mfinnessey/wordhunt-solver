@@ -1,6 +1,6 @@
 use crate::letter::Letter;
 use crate::letter_combination::LetterCombination;
-use crate::utilities::{ALPHABET_LENGTH, POINTS};
+use crate::utilities::{ALPHABET_LENGTH, BATCH_SIZE, POINTS};
 use std::collections::VecDeque;
 use trie_rs::inc_search::Answer;
 use trie_rs::Trie;
@@ -123,6 +123,65 @@ pub fn combination_score_all_possible_words_with_scores(
     score
 }
 
+pub fn combination_score_all_possible_words_with_scores_tiled(
+    words: &[([u8; ALPHABET_LENGTH], u8)],
+    letter_combinations: &[LetterCombination; BATCH_SIZE],
+) -> [u32; BATCH_SIZE] {
+    let mut scores = [0; BATCH_SIZE];
+
+    // FIXME adjust based on separate i/d caches
+    // sizeof each element is 26 * 8 + 8 = 216b
+    // l1 cache on zen5 is 80 KB / core while l2 is 1 MB / core
+    // with smt, assume that each thread has access to half the cahce
+    // attempt to keep everything in l1 cache for first iteration
+    // implies tile sizes of <= 370 elements
+    const DICTIONARY_TILE_SIZE: usize = 350;
+    let mut tile_base = 0;
+
+    while tile_base + DICTIONARY_TILE_SIZE < words.len() {
+        for (word_freqs, word_score) in words[tile_base..tile_base + DICTIONARY_TILE_SIZE].iter() {
+            for (letter_frequencies, score) in letter_combinations.iter().zip(scores.iter_mut()) {
+                let mut fits = true;
+                for (word_freq, ref letter_freq) in word_freqs
+                    .iter()
+                    .zip(<[u8; ALPHABET_LENGTH]>::from(*letter_frequencies))
+                {
+                    if word_freq > letter_freq {
+                        fits = false;
+                        break;
+                    }
+                }
+                if fits {
+                    *score += *word_score as u32;
+                }
+            }
+        }
+
+        tile_base += DICTIONARY_TILE_SIZE;
+    }
+
+    // handle (potential) partial last tile
+    for (word_freqs, word_score) in words[tile_base..].iter() {
+        for (letter_frequencies, score) in letter_combinations.iter().zip(scores.iter_mut()) {
+            let mut fits = true;
+            for (word_freq, ref letter_freq) in word_freqs
+                .iter()
+                .zip(<[u8; ALPHABET_LENGTH]>::from(*letter_frequencies))
+            {
+                if word_freq > letter_freq {
+                    fits = false;
+                    break;
+                }
+            }
+            if fits {
+                *score += *word_score as u32;
+            }
+        }
+    }
+
+    scores
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -235,24 +294,97 @@ mod tests {
     }
 
     #[test]
+    fn test_combination_score_all_possible_words_tiled() {
+        // test from first principles - measure the points that should be scored against
+        // an artifical word list
+        let mut expected_points = 0;
+        const FREQS: [u8; ALPHABET_LENGTH] = [
+            2, 1, 1, 0, 0, 0, 0, 11, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1,
+        ];
+
+        // maximal fit
+        let fits_16 = FREQS;
+        expected_points += POINTS[16];
+
+        // this should fit but score no points
+        let fits_1 = [
+            0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        ];
+        expected_points += POINTS[1];
+
+        // this should fit and score some points
+        let fits_3 = [
+            1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1,
+        ];
+        expected_points += POINTS[3];
+
+        // this shouldn't fit (and should score no points)
+        let no_fit = [
+            3, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1,
+        ];
+
+        let word_list = vec![
+            (fits_16, POINTS[16]),
+            (fits_1, POINTS[1]),
+            (fits_3, POINTS[3]),
+            (no_fit, POINTS[5]),
+        ];
+
+        let combinations = [FREQS.into(); BATCH_SIZE];
+
+        assert_eq!(
+            u32::from(expected_points),
+            combination_score_all_possible_words_with_scores_tiled(&word_list, &combinations)[0]
+        );
+    }
+
+    #[test]
     fn test_return_same_result() {
         const WORDLIST_FILENAME: &str = "wordlist-actual.txt";
         let combinations: Vec<LetterCombination> =
             read_random_combinations("tests/test_letter_combinations");
 
+        const COMBINATIONS_COUNT: u32 = 1_000;
         let trie = create_trie(WORDLIST_FILENAME);
         let word_vector = create_word_vector(WORDLIST_FILENAME);
         let word_vector_with_scores = create_word_vector_with_scores(WORDLIST_FILENAME);
+        // check same word list length commutatively
+        assert_eq!(trie.1, word_vector.1);
+        assert_eq!(word_vector.1, word_vector_with_scores.1);
 
-        for combination in combinations {
-            let score_trie = combination_score_all_possible_trie_paths(&trie.0, combination);
-            let score_vec = combination_score_all_possible_words(&word_vector.0, combination);
-            let score_vec_with_scores = combination_score_all_possible_words_with_scores(
+        let mut scores_trie = [0; COMBINATIONS_COUNT as usize];
+        let mut scores_vec = [0; COMBINATIONS_COUNT as usize];
+        let mut scores_vec_with_scores = [0; COMBINATIONS_COUNT as usize];
+        let mut scores_vec_with_scores_tiled = [0; COMBINATIONS_COUNT as usize];
+
+        let mut tiled_batch = [LetterCombination::new(ALL_A_FREQUENCIES); BATCH_SIZE];
+
+        for (i, combination) in combinations.iter().enumerate() {
+            scores_trie[i] = combination_score_all_possible_trie_paths(&trie.0, *combination);
+            scores_vec[i] = combination_score_all_possible_words(&word_vector.0, *combination);
+            scores_vec_with_scores[i] = combination_score_all_possible_words_with_scores(
                 &word_vector_with_scores.0,
-                combination,
+                *combination,
             );
-            assert_eq!(score_trie, score_vec);
-            assert_eq!(score_vec, score_vec_with_scores);
+
+            let batch_idx = i % BATCH_SIZE;
+            tiled_batch[batch_idx] = combination.to_owned();
+
+            if batch_idx == BATCH_SIZE - 1 {
+                let tiled_result = combination_score_all_possible_words_with_scores_tiled(
+                    &word_vector_with_scores.0,
+                    tiled_batch[0..500].try_into().unwrap(),
+                );
+                for tiled_idx in 0..BATCH_SIZE {
+                    scores_vec_with_scores_tiled[(i / BATCH_SIZE) * BATCH_SIZE + tiled_idx] =
+                        tiled_result[tiled_idx];
+                }
+            }
         }
+
+        // check equality commutatively
+        assert_eq!(scores_trie, scores_vec);
+        assert_eq!(scores_vec, scores_vec_with_scores);
+        assert_eq!(scores_vec_with_scores, scores_vec_with_scores_tiled);
     }
 }

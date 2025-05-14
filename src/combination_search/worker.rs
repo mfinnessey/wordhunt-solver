@@ -1,9 +1,7 @@
 use super::{PassMsg, PULL_LIMIT};
-use crate::letter::Letter;
 use crate::letter_combination::LetterCombination;
-use crate::utilities::ALPHABET_LENGTH;
+use crate::utilities::{ALL_A_FREQUENCIES, ALPHABET_LENGTH, BATCH_SIZE};
 use std::{iter, thread, time};
-use trie_rs::Trie;
 
 use crossbeam_deque::{Injector, Stealer, Worker};
 use std::sync::atomic::{AtomicBool, Ordering as MemoryOrdering};
@@ -13,7 +11,8 @@ use std::sync::{Arc, Condvar, Mutex, RwLock};
 /// in conjunction with the overall program.
 pub struct WorkerInformation<'a> {
     word_list: &'a Vec<([u8; ALPHABET_LENGTH], u8)>,
-    metric: fn(&Vec<([u8; ALPHABET_LENGTH], u8)>, LetterCombination) -> u32,
+    metric:
+        fn(&[([u8; ALPHABET_LENGTH], u8)], &[LetterCombination; BATCH_SIZE]) -> [u32; BATCH_SIZE],
     target: u32,
     /// queue accessors
     local: Worker<LetterCombination>,
@@ -50,7 +49,10 @@ impl<'a> WorkerInformation<'a> {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         word_list: &'a Vec<([u8; ALPHABET_LENGTH], u8)>,
-        metric: fn(&Vec<([u8; ALPHABET_LENGTH], u8)>, LetterCombination) -> u32,
+        metric: fn(
+            &[([u8; ALPHABET_LENGTH], u8)],
+            &[LetterCombination; BATCH_SIZE],
+        ) -> [u32; BATCH_SIZE],
         target: u32,
         local: Worker<LetterCombination>,
         global: Arc<Injector<LetterCombination>>,
@@ -104,6 +106,9 @@ pub fn evaluate_combinations(worker_information: WorkerInformation) {
     let aborting_early = worker_information.aborting_early;
 
     let mut passed_local = Vec::new();
+    // initialize to make rust happy
+    let mut batch_local = [LetterCombination::new(ALL_A_FREQUENCIES); BATCH_SIZE];
+    let mut batch_count = 0;
 
     loop {
         // modified from crossbeam::deque docs
@@ -126,14 +131,35 @@ pub fn evaluate_combinations(worker_information: WorkerInformation) {
         match combination {
             // process the combination
             Some(letters) => {
-                let score = (metric)(word_list, letters);
-                if score >= target {
-                    passed_local.push((letters, score));
+                // evaluate a batch at a time
+                batch_local[batch_count] = letters;
+                batch_count += 1;
+
+                if batch_count == BATCH_SIZE {
+                    batch_count = 0;
+                    evaluate_batch(
+                        metric,
+                        target,
+                        word_list,
+                        &batch_local,
+                        BATCH_SIZE,
+                        &mut passed_local,
+                    );
                 }
             }
             None => {
                 // nothing remaining period - we're done!
                 if *all_combinations_generated.read().unwrap() {
+                    // evaluate anything that's in the batch
+                    evaluate_batch(
+                        metric,
+                        target,
+                        word_list,
+                        &batch_local,
+                        batch_count,
+                        &mut passed_local,
+                    );
+
                     // move the local passed vector to the shared vector
                     *pass_vector.lock().unwrap() = Some(passed_local);
 
@@ -178,32 +204,26 @@ pub fn evaluate_combinations(worker_information: WorkerInformation) {
 
                 // there's stuff remaining, but the queues are dry - check if we should dump for a snapshot
                 if stop_for_snapshot.load(MemoryOrdering::SeqCst) {
-                    let mut is_last_worker = false;
                     let mut can_stop_for_snapshot = false;
                     {
-                        // TODO consider just not letting any workers stop until the generator is stopped
-                        let mut running_worker_count = num_running_workers.lock().unwrap();
-                        // this is the last worker thread stopping - verify that the generator has already stopped
-                        if *running_worker_count == 1 {
-                            is_last_worker = true;
-                            let generator_stopped = generator_thread_stopped.read().unwrap();
-                            if *generator_stopped {
-                                can_stop_for_snapshot = true;
-                                *running_worker_count -= 1;
-                            }
-                            // don't allow stopping if we were to be the last worker thread to stop
-                            // but the global thread has not stopped yet (busy wait)
-                        }
-                        // not the last worker thread stopping, so can freely stop and write snapshot
-                        else {
+                        let generator_stopped = generator_thread_stopped.read().unwrap();
+                        if *generator_stopped {
                             can_stop_for_snapshot = true;
-                            *running_worker_count -= 1;
                         }
-
-                        // drop num_running_workers mutex
                     }
 
                     if can_stop_for_snapshot {
+                        // process anything that's in the current batch
+                        evaluate_batch(
+                            metric,
+                            target,
+                            word_list,
+                            &batch_local,
+                            batch_count,
+                            &mut passed_local,
+                        );
+                        batch_count = 0;
+
                         // move the local passed vector to the shared vector
                         *pass_vector.lock().unwrap() = Some(passed_local);
                         passed_local = Vec::new();
@@ -214,14 +234,23 @@ pub fn evaluate_combinations(worker_information: WorkerInformation) {
 			    thread::current().name().unwrap_or("unnamed"), local.len())
                         }
 
-                        if is_last_worker {
-                            notify_snapshot_thread_all_workers_stopped(&workers_stopped);
+                        {
+                            let mut running_worker_count = num_running_workers.lock().unwrap();
+                            *running_worker_count -= 1;
+                            // the last worker to stop notifies the snapshot thread
+                            if *running_worker_count == 0 {
+                                notify_snapshot_thread_all_workers_stopped(&workers_stopped);
+                                println!(
+                                    "worker thread {} stopped for snapshot (last thread)",
+                                    thread::current().name().unwrap_or("unnamed")
+                                );
+                            } else {
+                                println!(
+                                    "worker thread {} stopped for snapshot",
+                                    thread::current().name().unwrap_or("unnamed")
+                                );
+                            }
                         }
-
-                        println!(
-                            "worker thread {} stopped for snapshot",
-                            thread::current().name().unwrap_or("unnamed")
-                        );
 
                         // block until the global thread has completed the snapshot
                         let mut snapshot_complete_predicate = snapshot_complete.0.lock().unwrap();
@@ -263,4 +292,28 @@ fn notify_snapshot_thread_all_workers_stopped(workers_stopped: &Arc<(Mutex<bool>
     *workers_stopped_predicate = true;
     let workers_stopped_cvar = &workers_stopped.1;
     workers_stopped_cvar.notify_all();
+}
+
+fn evaluate_batch(
+    metric: fn(
+        &[([u8; ALPHABET_LENGTH], u8)],
+        &[LetterCombination; BATCH_SIZE],
+    ) -> [u32; BATCH_SIZE],
+    target: u32,
+    words: &[([u8; ALPHABET_LENGTH], u8)],
+    letter_combinations: &[LetterCombination; BATCH_SIZE],
+    batch_count: usize,
+    passed_local: &mut Vec<PassMsg>,
+) {
+    let scores = metric(words, letter_combinations);
+    // trim off any bogus letter combinations (from a partially full batch)
+    // from consideration for movement to the pass vector
+    for (letter_combination, score) in letter_combinations[..batch_count]
+        .iter()
+        .zip(scores[..batch_count].iter())
+    {
+        if *score >= target {
+            passed_local.push((*letter_combination, *score));
+        }
+    }
 }

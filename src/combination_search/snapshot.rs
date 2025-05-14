@@ -158,7 +158,7 @@ pub fn take_snapshots(
                             thread_num
                         );
                     }
-                    // the last snapshot would be the exception - it's possible that workers terminate
+                    // the last snapshot would be the exception - it's possible that some workers terminate
                     // during the penultimate snapshot, leaving some unpopulated vector(s) around for the
                     // final snapshot
                 }

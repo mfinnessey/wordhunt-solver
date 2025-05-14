@@ -1,6 +1,6 @@
 use crate::combination_search::progress_information::ProgressInformation;
 use crate::letter_combination::LetterCombination;
-use crate::utilities::{ALL_A_FREQUENCIES, ALPHABET_LENGTH};
+use crate::utilities::{ALL_A_FREQUENCIES, ALPHABET_LENGTH, BATCH_SIZE};
 
 use generator::generate_combinations;
 use snapshot::take_snapshots;
@@ -38,7 +38,8 @@ pub struct CombinationSearch<'a> {
     word_list: &'a Vec<([u8; ALPHABET_LENGTH], u8)>,
     /// retain the score instead of simply a pass/fail bool so that we can eliminate combinations
     /// based off of lower bounds from stage 2
-    metric: fn(&Vec<([u8; ALPHABET_LENGTH], u8)>, LetterCombination) -> u32,
+    metric:
+        fn(&[([u8; ALPHABET_LENGTH], u8)], &[LetterCombination; BATCH_SIZE]) -> [u32; BATCH_SIZE],
     target: u32,
     num_worker_threads: usize,
     /// set by some outside mechanism (generally a signal handler) to cleanly terminate the
@@ -239,7 +240,10 @@ impl<'a> CombinationSearch<'a> {
 impl<'a> CombinationSearch<'a> {
     pub fn new(
         word_list: &'a Vec<([u8; ALPHABET_LENGTH], u8)>,
-        metric: fn(&Vec<([u8; ALPHABET_LENGTH], u8)>, LetterCombination) -> u32,
+        metric: fn(
+            &[([u8; ALPHABET_LENGTH], u8)],
+            &[LetterCombination; BATCH_SIZE],
+        ) -> [u32; BATCH_SIZE],
         target: u32,
         num_worker_threads: usize,
         terminator: Arc<Mutex<bool>>,
@@ -307,7 +311,7 @@ mod tests {
         let terminator = Arc::new(Mutex::new(false));
         let fcs: CombinationSearch = CombinationSearch::new(
             &dummy_vec,
-            count_letter_a,
+            count_letter_a_batch,
             TARGET_A_COUNT,
             num_workers,
             terminator.clone(),
@@ -346,7 +350,7 @@ mod tests {
         // second part of search
         let fcs2 = CombinationSearch::new(
             &dummy_vec,
-            count_letter_a,
+            count_letter_a_batch,
             TARGET_A_COUNT,
             num_workers,
             terminator.clone(),
@@ -378,7 +382,7 @@ mod tests {
         // second part of search
         let fcs3 = CombinationSearch::new(
             &dummy_vec,
-            count_letter_a,
+            count_letter_a_batch,
             TARGET_A_COUNT,
             num_workers,
             terminator.clone(),
@@ -399,7 +403,7 @@ mod tests {
 
         let expected: HashMap<PassMsg, usize> = unused_fake_combination_generator
             .filter_map(|x| {
-                let actual_count = count_letter_a(&dummy_vec, x);
+                let actual_count = count_letter_a(&x);
                 if actual_count >= TARGET_A_COUNT {
                     Some((x, actual_count))
                 } else {
@@ -450,7 +454,7 @@ mod tests {
 
         let fcs: CombinationSearch = CombinationSearch::new(
             &dummy_vec,
-            count_letter_a,
+            count_letter_a_batch,
             target_a_count,
             num_workers,
             Arc::new(Mutex::new(false)),
@@ -465,7 +469,7 @@ mod tests {
 
         let expected: HashMap<PassMsg, usize> = fake_combination_generator_unused
             .filter_map(|x| {
-                let actual_count = count_letter_a(&dummy_vec, x);
+                let actual_count = count_letter_a(&x);
                 if actual_count >= target_a_count {
                     Some((x, actual_count))
                 } else {
@@ -488,19 +492,32 @@ mod tests {
         assert_eq!(actual, expected);
     }
 
-    /// count the number of a's in the combination as an arbitrary, verifiable metric
-    fn count_letter_a(
-        _word_list: &Vec<([u8; ALPHABET_LENGTH], u8)>,
-        combination: LetterCombination,
-    ) -> u32 {
+    /// count the number of a's in the combinations as an arbitrary, verifiable metric
+    fn count_letter_a_batch(
+        _word_list: &[([u8; ALPHABET_LENGTH], u8)],
+        combinations: &[LetterCombination; BATCH_SIZE],
+    ) -> [u32; BATCH_SIZE] {
         // use the last u8's  high for the range to make
-        // the signature still match. a fun lil testing hack!
-        let high: u32 = (max(1, combination[25]) as u32) * 1_000;
+        // the signature still match. a fun lil testning hack!
 
-        // simulate doing some real work
-        for _ in 1..random_range(100..high) {
-            black_box(())
+        for combination in combinations {
+            let high: u32 = (max(1, combination[25]) as u32) * 1_000;
+            // simulate doing some real work
+            for _ in 1..random_range(100..high) {
+                black_box(())
+            }
         }
+
+        combinations
+            .iter()
+            .map(|combination| combination[0] as u32)
+            .collect::<Vec<u32>>()
+            .try_into()
+            .unwrap()
+    }
+
+    /// quick version for verification
+    fn count_letter_a(combination: &LetterCombination) -> u32 {
         combination[0].into()
     }
 

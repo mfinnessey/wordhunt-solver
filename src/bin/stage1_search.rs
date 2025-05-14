@@ -3,7 +3,7 @@ use std::sync::{Arc, Mutex};
 
 use wordhunt_solver::combination_search::combination_generator::SequentialLetterCombinationGenerator;
 use wordhunt_solver::combination_search::{
-    bounding_functions::combination_score_all_possible_words_with_scores, CombinationSearch,
+    bounding_functions::combination_score_all_possible_words_with_scores_tiled, CombinationSearch,
 };
 use wordhunt_solver::utilities::create_word_vector_with_scores;
 use wordhunt_solver::utilities::snapshot_utilities::read_next_progress_information_from_directory;
@@ -44,7 +44,7 @@ fn main() {
 
     let combination_evaluator = CombinationSearch::new(
         &word_vector_with_scores,
-        combination_score_all_possible_words_with_scores,
+        combination_score_all_possible_words_with_scores_tiled,
         1640,
         std::thread::available_parallelism().unwrap().get(),
         combination_terminator,
