@@ -163,12 +163,14 @@ impl CombinationSearch<'_> {
 
             let mut worker_threads: Vec<ScopedJoinHandle<'_, ()>> = Vec::new();
             println!("Spawning {} worker threads.", self.num_worker_threads);
-            for thread_num in 0..self.num_worker_threads {
+            for (thread_num, pass_vector) in pass_vectors
+                .iter()
+                .enumerate()
+                .take(self.num_worker_threads)
+            {
                 let thread_worker = workers.pop().expect("missing element in workers vector");
                 let stealers_ref = stealers_vec_ref.clone();
                 let global_ref = global_queue_ref.clone();
-                let pass_vector: Arc<Mutex<Option<Vec<PassMsg>>>> =
-                    Arc::clone(&pass_vectors[thread_num]);
 
                 // TODO clone this struct and separate non-shared stuff out
                 let worker_information = WorkerInformation::new(
