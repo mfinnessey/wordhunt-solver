@@ -149,7 +149,7 @@ pub fn evaluate_combinations(worker_information: WorkerInformation) {
             }
             None => {
                 // nothing remaining period - we're done!
-                if *all_combinations_generated.read().unwrap() {
+                if *all_combinations_generated.read().expect("generator or snapshot thread paniced while holding all_combinations_generated rwlock") {
                     // evaluate anything that's in the batch
                     evaluate_batch(
                         metric,
@@ -161,18 +161,18 @@ pub fn evaluate_combinations(worker_information: WorkerInformation) {
                     );
 
                     // move the local passed vector to the shared vector
-                    *pass_vector.lock().unwrap() = Some(passed_local);
+                    *pass_vector.lock().expect(&format!("snapshot thread paniced while holding pass_vector mutex for worker thread {}", thread::current().name().unwrap_or("unnamed"))) = Some(passed_local);
 
                     // it's possible for all_combinations_generated to be set after some workers have stopped
                     // for a snapshot but not all, so we need to be compatible with the normal start / stop
                     // mechanism
                     {
-                        let mut running_worker_count = num_running_workers.lock().unwrap();
+                        let mut running_worker_count = num_running_workers.lock().expect("snapshot or worker thread paniced while holding num_running_workers mutex");
                         // decrement active workers before running workers to ensure that any subsequent restart
                         // doesn't rely on this thread restarting (as the decrement to the running workers MUST occur
                         // before such a restart attempt by construction, but we could be the second to last thread to
                         // stop here with the last thread stopping in the "normal" snapshot case)
-                        *num_active_workers.lock().unwrap() -= 1;
+                        *num_active_workers.lock().expect("snapshot or worker thread paniced while holding num_active_workers mutex") -= 1;
                         *running_worker_count -= 1;
                         if *running_worker_count == 1 {
                             notify_snapshot_thread_all_workers_stopped(&workers_stopped);
@@ -182,7 +182,7 @@ pub fn evaluate_combinations(worker_information: WorkerInformation) {
                             "worker thread {} stopped with {} running {} active",
                             thread::current().name().unwrap_or("unnamed"),
                             *running_worker_count,
-                            *num_active_workers.lock().unwrap()
+                            *num_active_workers.lock().expect("snapshot or worker thread paniced while holding num_active_workers mutex")
                         );
                     }
 
@@ -206,7 +206,7 @@ pub fn evaluate_combinations(worker_information: WorkerInformation) {
                 if stop_for_snapshot.load(MemoryOrdering::SeqCst) {
                     let mut can_stop_for_snapshot = false;
                     {
-                        let generator_stopped = generator_thread_stopped.read().unwrap();
+                        let generator_stopped = generator_thread_stopped.read().expect("generator or snapshot thread paniced while holding generator_stopped mutex");
                         if *generator_stopped {
                             can_stop_for_snapshot = true;
                         }
@@ -225,7 +225,7 @@ pub fn evaluate_combinations(worker_information: WorkerInformation) {
                         batch_count = 0;
 
                         // move the local passed vector to the shared vector
-                        *pass_vector.lock().unwrap() = Some(passed_local);
+                        *pass_vector.lock().expect(&format!("snapshot thread paniced while holding pass_vector mutex for worker thread {}", thread::current().name().unwrap_or("unnamed"))) = Some(passed_local);
                         passed_local = Vec::new();
 
                         // check snapshot invariant (queues empty)
@@ -235,7 +235,7 @@ pub fn evaluate_combinations(worker_information: WorkerInformation) {
                         }
 
                         {
-                            let mut running_worker_count = num_running_workers.lock().unwrap();
+                            let mut running_worker_count = num_running_workers.lock().expect("generator or worker thread paniced while holding num_running_workers mutex");
                             *running_worker_count -= 1;
                             // the last worker to stop notifies the snapshot thread
                             if *running_worker_count == 0 {
@@ -253,15 +253,15 @@ pub fn evaluate_combinations(worker_information: WorkerInformation) {
                         }
 
                         // block until the global thread has completed the snapshot
-                        let mut snapshot_complete_predicate = snapshot_complete.0.lock().unwrap();
+                        let mut snapshot_complete_predicate = snapshot_complete.0.lock().expect("snapshot or worker thread paniced while holding worker snapshot_complete mutex");
                         let snapshot_complete_condvar = &snapshot_complete.1;
                         while !*snapshot_complete_predicate {
                             snapshot_complete_predicate = snapshot_complete_condvar
                                 .wait(snapshot_complete_predicate)
-                                .unwrap();
+                                .expect("snapshot or worker thread paniced while holding worker snapshot_complete mutex");
                         }
 
-                        if *aborting_early.read().unwrap() {
+                        if *aborting_early.read().expect("generator or snapshot thread paniced while holding aborting_early mutex") {
                             println!(
                                 "worker thread {} aborting early",
                                 thread::current().name().unwrap_or("unnamed")
@@ -269,7 +269,7 @@ pub fn evaluate_combinations(worker_information: WorkerInformation) {
                             return;
                         }
 
-                        *num_running_workers.lock().unwrap() += 1;
+                        *num_running_workers.lock().expect("snapshot or worker thread paniced while holding num_running_workers mutex") += 1;
                         println!(
                             "worker thread {} restarted after snapshot",
                             thread::current().name().unwrap_or("unnamed")
@@ -288,7 +288,10 @@ pub fn evaluate_combinations(worker_information: WorkerInformation) {
 
 fn notify_snapshot_thread_all_workers_stopped(workers_stopped: &Arc<(Mutex<bool>, Condvar)>) {
     // notify the snapshot thread that all workers have stopped.
-    let mut workers_stopped_predicate = workers_stopped.0.lock().unwrap();
+    let mut workers_stopped_predicate = workers_stopped
+        .0
+        .lock()
+        .expect("snapshot thread paniced while holding workers_stopped mutex");
     *workers_stopped_predicate = true;
     let workers_stopped_cvar = &workers_stopped.1;
     workers_stopped_cvar.notify_all();

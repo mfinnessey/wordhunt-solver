@@ -44,8 +44,14 @@ pub fn generate_combinations(
         // predicted efficiently enough)
         if stop_for_snapshot.load(MemoryOrdering::SeqCst) {
             // write state that the snapshot thread needs
-            *next_combination.lock().unwrap() = Some(combination);
-            *batch_count.lock().unwrap() = local_batch_count;
+            *next_combination
+                .lock()
+                .expect("snapshot thread paniced while holding next_combination mutex") =
+                Some(combination);
+            *batch_count
+                .lock()
+                .expect("snapshot thread paniced while holding batch_count mutex") =
+                local_batch_count;
 
             // notify worker threads that we have stopped generating new combinations
             // and intentionally drop the guard asap to try to avoid blocking readers
@@ -54,7 +60,9 @@ pub fn generate_combinations(
             // then the flag would prevent the last worker thread from stopping until
             // this thread has stopped, thus ensuring that the queues are emptied.
             {
-                let mut generation_stopped = generator_thread_stopped.write().unwrap();
+                let mut generation_stopped = generator_thread_stopped.write().expect(
+                    "snapshot or worker thread paniced while holding generation_stopped rwlock",
+                );
                 *generation_stopped = true;
             }
 
@@ -65,12 +73,19 @@ pub fn generate_combinations(
 
             // block until the snapshot is complete
             let (ref lock, ref condvar) = *snapshot_complete;
-            let mut snapshot_completed_check = lock.lock().unwrap();
+            let mut snapshot_completed_check = lock
+                .lock()
+                .expect("snapshot thread paniced while holding generator snapshot complete mutex");
             while !*snapshot_completed_check {
-                snapshot_completed_check = condvar.wait(snapshot_completed_check).unwrap();
+                snapshot_completed_check = condvar.wait(snapshot_completed_check).expect(
+                    "snapshot thread paniced while holding generator snapshot complete mutex",
+                );
             }
 
-            if *aborting_early.read().unwrap() {
+            if *aborting_early
+                .read()
+                .expect("snapshot or worker thread paniced while holding generator abortion rwlock")
+            {
                 println!("generator thread detected early abort");
                 return;
             }
@@ -90,9 +105,17 @@ pub fn generate_combinations(
         local_batch_count += 1;
     }
 
-    *batch_count.lock().unwrap() = local_batch_count;
-    *next_combination.lock().unwrap() = None;
-    *generator_thread_stopped.write().unwrap() = true;
-    *all_combinations_generated.write().unwrap() = true;
+    *batch_count
+        .lock()
+        .expect("snapshot thread paniced while holding batch_count mutex") = local_batch_count;
+    *next_combination
+        .lock()
+        .expect("snapshot thread paniced while holding next_combination mutex") = None;
+    *generator_thread_stopped.write().expect(
+        "snapshot or worker thread paniced while holding generator_thread_stopped rwlock",
+    ) = true;
+    *all_combinations_generated.write().expect(
+        "snapshot or worker thread paniced while holding all_combinations_generated rwlock ",
+    ) = true;
     println!("generated all combinations");
 }

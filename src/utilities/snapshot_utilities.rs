@@ -12,7 +12,10 @@ use std::path::Path;
 pub fn aggregate_snapshots_from_directory<P: AsRef<Path>>(
     directory: P,
 ) -> Result<Vec<PassMsg>, String> {
-    let snapshot_file_regex = Regex::new(r"^*/[0-9]+$").unwrap();
+    let snapshot_file_regex = match Regex::new(r"^*/[0-9]+$") {
+        Ok(regex) => regex,
+        Err(e) => panic!("failed to create snapshot_file regex due to error: {e}"),
+    };
 
     let mut seen_snapshot_numbers = HashSet::new();
     let mut pass_msgs: Vec<PassMsg> = Vec::new();
@@ -26,13 +29,25 @@ pub fn aggregate_snapshots_from_directory<P: AsRef<Path>>(
             continue;
         }
         // ignore non-snapshot files
-        let file_path_as_string = file_path.clone().into_os_string().into_string().unwrap();
+        let file_path_as_string =
+            file_path
+                .clone()
+                .into_os_string()
+                .into_string()
+                .expect(&format!(
+                    "failed to convert file path {} into a utf-8 string",
+                    file_path.display()
+                ));
         if !snapshot_file_regex.is_match(&file_path_as_string) {
             continue;
         }
 
         if let Some(file_name) = file_path.file_name() {
-            if let Ok(snapshot_number) = file_name.to_str().unwrap().parse() {
+            if let Ok(snapshot_number) = file_name
+                .to_str()
+                .expect("failed to convert snapshot filename to a utf-8 string")
+                .parse()
+            {
                 seen_snapshot_numbers.insert(snapshot_number);
             } else {
                 return Err("Regex-validated file name did not parse as a number".to_string());
@@ -75,10 +90,17 @@ pub fn read_next_progress_information_from_directory<P: AsRef<Path>>(
     directory: P,
 ) -> Result<(u32, ProgressInformation), String> {
     // find all next combination files
-    let snapshot_file_regex = Regex::new(r"^*/[0-9]+PROGRESS").unwrap();
+    let progress_information_regex = match Regex::new(r"^*/[0-9]+PROGRESS") {
+        Ok(regex) => regex,
+        Err(e) => panic!(
+            "failed to create progrss_information_regex due to error: {}",
+            e
+        ),
+    };
+
     let progress_length = PROGRESS_SNAPSHOT_IDENTIFIER.len();
-    let mut max_snapshot_num: u32 = 0;
-    let mut max_snapshot_file_path = None;
+    let mut max_progress_information_num: u32 = 0;
+    let mut max_progress_information_file_path = None;
 
     let files = read_dir(directory).map_err(|_e| "Could not read directory!")?;
 
@@ -90,36 +112,50 @@ pub fn read_next_progress_information_from_directory<P: AsRef<Path>>(
             continue;
         }
         // ignore non-next combination files
-        let file_path_as_string = file_path.clone().into_os_string().into_string().unwrap();
-        if !snapshot_file_regex.is_match(&file_path_as_string) {
+        let file_path_as_string =
+            file_path
+                .clone()
+                .into_os_string()
+                .into_string()
+                .expect(&format!(
+                    "failed to convert filepath {} into a utf-8 string",
+                    file_path.display()
+                ));
+        if !progress_information_regex.is_match(&file_path_as_string) {
             continue;
         }
 
         if let Some(file_name) = file_path.file_name() {
-            let file_name_str = file_name.to_str().unwrap();
+            let file_name_str = file_name
+                .to_str()
+                .expect("failed to convert progress information filename into a utf-8 string");
 
             let num_slice = &file_name_str[..file_name_str.len() - progress_length];
-            // no point in not unwrapping given it's validated by the regex
-            let snapshot_num: u32 = num_slice.parse().unwrap();
+            let progress_information_num: u32 = num_slice.parse().expect(&format!(
+                "regex-validated number {} failed to parse as a number",
+                num_slice
+            ));
 
             // retain the path to the maximal snapshot file that we've fouund so far (including the first)
             // the is_none check ensures that max_snapshot_num will be initialized with real data by
             // construction before its first reading
-            if max_snapshot_file_path.is_none() || snapshot_num > max_snapshot_num {
-                max_snapshot_num = snapshot_num;
-                max_snapshot_file_path = Some(file_path);
+            if max_progress_information_file_path.is_none()
+                || progress_information_num > max_progress_information_num
+            {
+                max_progress_information_num = progress_information_num;
+                max_progress_information_file_path = Some(file_path);
             }
         } else {
             return Err("File has no name!".to_string());
         }
     }
 
-    match max_snapshot_file_path {
+    match max_progress_information_file_path {
         Some(path) => {
             let data = read(path).map_err(|_e| "Error reading file data")?;
             let deser =
                 bincode::deserialize::<ProgressInformation>(&data).map_err(|e| e.to_string())?;
-            Ok((max_snapshot_num, deser))
+            Ok((max_progress_information_num, deser))
         }
         None => Err("No next combination files found in directory".to_string()),
     }

@@ -161,8 +161,7 @@ impl<'a> CombinationSearch<'a> {
             let mut worker_threads: Vec<ScopedJoinHandle<'_, ()>> = Vec::new();
             println!("Spawning {} worker threads.", self.num_worker_threads);
             for thread_num in 0..self.num_worker_threads {
-                // using unwrap as is safe by construction - we have pushed num_worker_threads elements
-                let thread_worker = workers.pop().unwrap();
+                let thread_worker = workers.pop().expect("missing element in workers vector");
                 let stealers_ref = stealers_vec_ref.clone();
                 let global_ref = global_queue_ref.clone();
                 let pass_vector: Arc<Mutex<Option<Vec<PassMsg>>>> =
@@ -190,7 +189,7 @@ impl<'a> CombinationSearch<'a> {
                     .builder()
                     .name(thread_num.to_string())
                     .spawn(move |_| evaluate_combinations(worker_information))
-                    .unwrap();
+                    .expect("failed to spawn worker thread");
                 worker_threads.push(handle);
             }
 
@@ -230,7 +229,7 @@ impl<'a> CombinationSearch<'a> {
                 panic!("snapshot thread paniced!");
             }
         })
-        .unwrap(); // unwrap as we would just panic anyways
+        .expect("combination search failed to spawn or terminate threads cleanly");
 
         snapshots_directory
     }

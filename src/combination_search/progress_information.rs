@@ -22,7 +22,7 @@ impl ProgressInformation {
         // create the snapshots directory
         let secs_since_unix_epoch = start_time
             .duration_since(SystemTime::UNIX_EPOCH)
-            .unwrap()
+            .expect("time shenanigans are afoot")
             .as_secs()
             .to_string();
         let path_string = "snapshots-".to_string() + &secs_since_unix_epoch;
@@ -70,11 +70,20 @@ impl ProgressInformation {
         self.next_combination = next_combination.copied();
 
         // dump state to disk
-        let encoded_progress_information = bincode::serialize(&self).unwrap();
+        let encoded_progress_information =
+            bincode::serialize(&self).expect("serialization of progress_information failed");
         let progress_information_name =
             self.snapshot_num.to_string() + PROGRESS_SNAPSHOT_IDENTIFIER;
-        snapshots_directory.push(progress_information_name);
-        fs::write(snapshots_directory, encoded_progress_information).unwrap();
+        let mut snapshot_path = snapshots_directory;
+        snapshot_path.push(progress_information_name);
+        match fs::write(&snapshot_path, encoded_progress_information) {
+            Ok(_) => (),
+            Err(e) => panic!(
+                "failed to write progress information to disk at {} due to error: {}",
+                snapshot_path.display(),
+                e.to_string()
+            ),
+        }
 
         // bail out of other calculations if we're not printing statistics for whatever reason
         if !print_statistics {

@@ -30,12 +30,15 @@ fn main() {
 
     // write generated combinations to disk
     let aggregated_combinations: Vec<LetterCombination> = Vec::from_iter(combinations);
-    let encoded_aggregated_combinations = bincode::serialize(&aggregated_combinations).unwrap();
-    fs::write(
+    let encoded_aggregated_combinations = bincode::serialize(&aggregated_combinations)
+        .expect("failed to serialize letter combinations");
+    match fs::write(
         "random_letter_combinations",
         encoded_aggregated_combinations,
-    )
-    .unwrap();
+    ) {
+	Ok(_) => (),
+	Err(e) => panic!("failed to write serialized letter combinations to disk at random_letter_combinations due to error: {}", e) 
+    };
 }
 
 /// generate a random letter combination

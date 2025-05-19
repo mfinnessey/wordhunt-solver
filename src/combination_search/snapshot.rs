@@ -57,13 +57,20 @@ pub fn take_snapshots(
             // but I have another check after all workers are stopped anyways, which would
             // handle the case in which this is some positive integer less than the starting
             // number of workers
-            if *num_active_workers.lock().unwrap() == 0 {
+            if *num_active_workers
+                .lock()
+                .expect("snapshot thread paniced while holding num_active_workres mutex")
+                == 0
+            {
                 println!("snapshot thread detected workers completed - taking last snapshot");
                 is_last_snapshot = true;
                 break;
             }
 
-            if *early_abort.lock().unwrap() {
+            if *early_abort
+                .lock()
+                .expect("generator or worker thread paniced while holding early_abort mutex")
+            {
                 is_aborting_early = true;
                 println!("snapshot thread detected abort request");
                 break;
@@ -77,19 +84,36 @@ pub fn take_snapshots(
         // the workers indicate this by incrementing the number of running workers.
         // note that this check is particularly key as not all workers may have been scheduled
         // yet after a snapshot is completed
-        while (*generator_snapshot_complete.0.lock().unwrap()
-            && !*all_combinations_generated.read().unwrap())
-            || *num_running_workers.lock().unwrap() != *num_active_workers.lock().unwrap()
+        while (*generator_snapshot_complete
+            .0
+            .lock()
+            .expect("generator thread paniced while holding generator_snapshot_complete mutex")
+            && !*all_combinations_generated.read().expect(
+                "generator or worker thread paniced while holding all_combinations_generated mutex",
+            ))
+            || *num_running_workers
+                .lock()
+                .expect("worker thread paniced while holding num_running_workers mutex")
+                != *num_active_workers
+                    .lock()
+                    .expect("worker thread paniced while holding num_active_workers mutex")
         {
             println!(
                 "num running {} num active {}",
-                *num_running_workers.lock().unwrap(),
-                *num_active_workers.lock().unwrap()
+                *num_running_workers
+                    .lock()
+                    .expect("worker thread paniced while holding num_running_workers mutex"),
+                *num_active_workers
+                    .lock()
+                    .expect("worker thread paniced while holding num_active_workers mutex")
             );
 
             thread::sleep(time::Duration::from_millis(100));
         }
-        *workers_snapshot_complete.0.lock().unwrap() = false;
+        *workers_snapshot_complete
+            .0
+            .lock()
+            .expect("worker thread paniced while holding workers_snapshot_complete mutex") = false;
 
         // trigger the snapshot
         progress_information.bump_snapshot_number();
@@ -105,16 +129,23 @@ pub fn take_snapshots(
         if !is_last_snapshot {
             println!("waiting for other threads to stop");
             let (ref workers_stopped_lock, ref workers_stopped_condvar) = *workers_stopped;
-            let mut snapshot_completed_check = workers_stopped_lock.lock().unwrap();
+            let mut snapshot_completed_check = workers_stopped_lock
+                .lock()
+                .expect("worker thread paniced while holding workers_stopped mutex");
             while !*snapshot_completed_check {
                 let result = workers_stopped_condvar
                     .wait_timeout(snapshot_completed_check, time::Duration::from_secs(60))
-                    .unwrap();
+                    .expect("worker thread paniced while holding workers_stopped mutex");
 
                 // this loop is racy with the last worker thread stopping.
                 // prevent the case where the worker stops before we're waiting
                 // on the condvar and we never get signaled :/
-                if result.1.timed_out() && *num_active_workers.lock().unwrap() == 0 {
+                if result.1.timed_out()
+                    && *num_active_workers
+                        .lock()
+                        .expect("worker thread paniced while holding num_active_workers mutex")
+                        == 0
+                {
                     is_last_snapshot = true;
                     break;
                 }
@@ -133,7 +164,11 @@ pub fn take_snapshots(
 
         // recheck if any workers have stopped (workers might have finished out the last combinations during
         // this snapshot)
-        if *num_active_workers.lock().unwrap() == 0 {
+        if *num_active_workers
+            .lock()
+            .expect("worker thread paniced while holding num_active_workers mutex")
+            == 0
+        {
             println!("snapshot thread detected workers completed - last snapshot data gathered");
             is_last_snapshot = true;
         }
@@ -142,7 +177,10 @@ pub fn take_snapshots(
         // aggregate worker vectors for a single write
         let mut passing_results: Vec<PassMsg> = Vec::new();
         for (thread_num, mutex) in worker_pass_vectors.iter().enumerate() {
-            let mut worker_vec_guard = mutex.lock().unwrap();
+            let mut worker_vec_guard = mutex.lock().expect(&format!(
+                "worker thread {} paniced while holding its pass_vector mutex",
+                thread_num
+            ));
             match *worker_vec_guard {
                 Some(ref populated_vec) => {
                     passing_results.extend(populated_vec.iter());
@@ -168,21 +206,32 @@ pub fn take_snapshots(
         let batch_pass_count = passing_results.len();
 
         // write the passing results to the disk
-        let encoded_passing_results = bincode::serialize(&passing_results).unwrap();
+        let encoded_passing_results =
+            bincode::serialize(&passing_results).expect("failed to serialize passing results");
         let snapshot_name = progress_information.get_snapshot_number().to_string();
         let snapshots_directory = progress_information.get_snapshots_directory();
         let mut snapshot_path = snapshots_directory.to_path_buf();
         snapshot_path.push(snapshot_name);
 
-        // intentionally panic if the filesystem operation fails
-        fs::write(snapshot_path, encoded_passing_results).unwrap();
+        match fs::write(&snapshot_path, encoded_passing_results) {
+            Ok(_) => (),
+            Err(e) => panic!(
+                "write of serialized pass vectors to disk at {} failed due to error: {}",
+                snapshot_path.display(),
+                e.to_string()
+            ),
+        }
 
         // write progress information to disk (the snapshot consists of the results up to this
         // point, the next combination to be considered, and statistics about what we've processed so far)
         // it's important that this occurs after the previous write so that we do not erroneously
         // skip vectors if we fail in between these steps
-        let next_combination = *generator_next_combination.lock().unwrap();
-        let batch_evaluated_count = *batch_count.lock().unwrap();
+        let next_combination = *generator_next_combination
+            .lock()
+            .expect("generator thread paniced while holding next_combination mutex");
+        let batch_evaluated_count = *batch_count
+            .lock()
+            .expect("generator thread paniced while holding batch_count mutex");
         progress_information.update_with_batch(
             batch_pass_count as u64,
             batch_evaluated_count,
@@ -202,19 +251,30 @@ pub fn take_snapshots(
         // as normal but rather signal them that they should abort too
         if is_aborting_early {
             println!("snapshot thread aborting other threads");
-            *abort_other_threads.write().unwrap() = true;
+            *abort_other_threads
+                .write()
+                .expect("snapshot or worker thread paniced while holding abort_early mutex") = true;
 
-            *generator_snapshot_complete.0.lock().unwrap() = true;
+            *generator_snapshot_complete
+                .0
+                .lock()
+                .expect("generator paniced while holding generator_snapshot_complete mutex") = true;
             generator_snapshot_complete.1.notify_all();
 
-            *workers_snapshot_complete.0.lock().unwrap() = true;
+            *workers_snapshot_complete
+                .0
+                .lock()
+                .expect("worker thread paniced while holding workers_snapshot_complete mutex") =
+                true;
             workers_snapshot_complete.1.notify_all();
 
             // indicate abortion recognized back to the initiator (currently for testing)
             // note that while state is persisted at this point, abortion is NOT complete
             // (that occurs after the CombinationSearch joins the worker and generator
             // threads)
-            *early_abort.lock().unwrap() = false;
+            *early_abort
+                .lock()
+                .expect("signal handler thread paniced while holding early_abort mutex") = false;
             return;
         }
 
@@ -224,17 +284,29 @@ pub fn take_snapshots(
         // re-start the generator thread first to limit context switch
         // thrashing while it builds up a buffer in the global queue
         // reset from this snapshot
-        *generator_stopped.write().unwrap() = false;
+        *generator_stopped
+            .write()
+            .expect("generator thread paniced while holding generator_stopped mutex") = false;
         // signal generator to resume
-        *generator_snapshot_complete.0.lock().unwrap() = true;
+        *generator_snapshot_complete
+            .0
+            .lock()
+            .expect("generator thread paniced while holding generator_snapshot_complete mutex") =
+            true;
         generator_snapshot_complete.1.notify_all();
         thread::sleep(SPIN_UP_WAIT);
 
         // re-start the worker threads
         // reset from this snapshot
-        *workers_stopped.0.lock().unwrap() = false;
+        *workers_stopped
+            .0
+            .lock()
+            .expect("worker thread paniced while holding workers_stopped mutex") = false;
         // signal workers to resume
-        *workers_snapshot_complete.0.lock().unwrap() = true;
+        *workers_snapshot_complete
+            .0
+            .lock()
+            .expect("worker thread paniced while holding workers_snapshot_complete mutex") = true;
         workers_snapshot_complete.1.notify_all();
     }
 }

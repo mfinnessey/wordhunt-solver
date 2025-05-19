@@ -39,14 +39,18 @@ fn main() {
 
     let combination_terminator: Arc<Mutex<bool>> = Arc::new(Mutex::new(false));
     let combination_terminator_ref = combination_terminator.clone();
-    ctrlc::set_handler(move || *combination_terminator_ref.lock().unwrap() = true)
+    ctrlc::set_handler(move || *combination_terminator_ref.lock().expect("another thread erroneously accessed and paniced while holding the combination terminator") = true)
         .expect("FAILED TO SET CTRL-C HANDLER");
 
+    let num_threads = match std::thread::available_parallelism() {
+        Ok(n) => n.get(),
+        Err(e) => panic!("failed to get available parllelism due to error: {}", e),
+    };
     let combination_evaluator = CombinationSearch::new(
         &word_vector_with_scores,
         combination_score_all_possible_words_with_scores_tiled,
         1640,
-        std::thread::available_parallelism().unwrap().get(),
+        num_threads,
         combination_terminator,
     );
 

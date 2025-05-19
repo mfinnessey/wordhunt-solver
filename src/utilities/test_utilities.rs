@@ -21,7 +21,7 @@ impl<P: AsRef<Path>> TestCleanup<P> {
 impl<P: AsRef<Path>> Drop for TestCleanup<P> {
     fn drop(&mut self) {
         if let Some(dir) = self.test_dir.take() {
-            remove_dir_all(dir).unwrap();
+            remove_dir_all(dir).expect("failed to remove test directory");
         }
     }
 }
