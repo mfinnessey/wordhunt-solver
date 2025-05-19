@@ -32,14 +32,17 @@ const SPIN_UP_WAIT: time::Duration = time::Duration::from_millis(200);
 
 /// data generated for a passing combination
 pub type PassMsg = (LetterCombination, u32);
+/// metric to evaluate a slice of LetterCombinations against a wordlist
+/// expressed as a slice of words expressed as their letter frequencies and their score
+pub type EvaluationMetric =
+    fn(&[([u8; ALPHABET_LENGTH], u8)], &[LetterCombination; BATCH_SIZE]) -> [u32; BATCH_SIZE];
 
 /// evaluates all combinations of letters using a given wordlist using a given metric
 pub struct CombinationSearch<'a> {
     word_list: &'a Vec<([u8; ALPHABET_LENGTH], u8)>,
     /// retain the score instead of simply a pass/fail bool so that we can eliminate combinations
     /// based off of lower bounds from stage 2
-    metric:
-        fn(&[([u8; ALPHABET_LENGTH], u8)], &[LetterCombination; BATCH_SIZE]) -> [u32; BATCH_SIZE],
+    metric: EvaluationMetric,
     target: u32,
     num_worker_threads: usize,
     /// set by some outside mechanism (generally a signal handler) to cleanly terminate the
@@ -239,10 +242,7 @@ impl CombinationSearch<'_> {
 impl<'a> CombinationSearch<'a> {
     pub fn new(
         word_list: &'a Vec<([u8; ALPHABET_LENGTH], u8)>,
-        metric: fn(
-            &[([u8; ALPHABET_LENGTH], u8)],
-            &[LetterCombination; BATCH_SIZE],
-        ) -> [u32; BATCH_SIZE],
+        metric: EvaluationMetric,
         target: u32,
         num_worker_threads: usize,
         terminator: Arc<Mutex<bool>>,

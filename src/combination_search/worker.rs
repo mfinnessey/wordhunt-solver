@@ -1,4 +1,5 @@
 use super::{PassMsg, PULL_LIMIT};
+use crate::combination_search::EvaluationMetric;
 use crate::letter_combination::LetterCombination;
 use crate::utilities::{ALL_A_FREQUENCIES, ALPHABET_LENGTH, BATCH_SIZE};
 use std::{iter, thread, time};
@@ -11,8 +12,7 @@ use std::sync::{Arc, Condvar, Mutex, RwLock};
 /// in conjunction with the overall program.
 pub struct WorkerInformation<'a> {
     word_list: &'a Vec<([u8; ALPHABET_LENGTH], u8)>,
-    metric:
-        fn(&[([u8; ALPHABET_LENGTH], u8)], &[LetterCombination; BATCH_SIZE]) -> [u32; BATCH_SIZE],
+    metric: EvaluationMetric,
     target: u32,
     /// queue accessors
     local: Worker<LetterCombination>,
@@ -49,10 +49,7 @@ impl<'a> WorkerInformation<'a> {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         word_list: &'a Vec<([u8; ALPHABET_LENGTH], u8)>,
-        metric: fn(
-            &[([u8; ALPHABET_LENGTH], u8)],
-            &[LetterCombination; BATCH_SIZE],
-        ) -> [u32; BATCH_SIZE],
+        metric: EvaluationMetric,
         target: u32,
         local: Worker<LetterCombination>,
         global: Arc<Injector<LetterCombination>>,
@@ -298,10 +295,7 @@ fn notify_snapshot_thread_all_workers_stopped(workers_stopped: &Arc<(Mutex<bool>
 }
 
 fn evaluate_batch(
-    metric: fn(
-        &[([u8; ALPHABET_LENGTH], u8)],
-        &[LetterCombination; BATCH_SIZE],
-    ) -> [u32; BATCH_SIZE],
+    metric: EvaluationMetric,
     target: u32,
     words: &[([u8; ALPHABET_LENGTH], u8)],
     letter_combinations: &[LetterCombination; BATCH_SIZE],
