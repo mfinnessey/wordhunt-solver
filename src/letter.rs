@@ -80,21 +80,6 @@ impl fmt::Display for Letter {
     }
 }
 
-/// marker type for letter-specific implementation of trie-rs library function
-/*#[derive(Clone)]
-pub struct LetterCollect;
-
-impl TryFromIterator<Letter, LetterCollect> for Vec<Letter> {
-    type Error = ();
-    fn try_from_iter<T>(iter: T) -> Result<Self, Self::Error>
-    where
-    Self: Sized,
-    T: IntoIterator<Item = Letter>,
-    {
-    Ok(iter.into_iter().collect::<Vec<Letter>>())
-    }
-} */
-
 static TRANSLATOR: Lazy<Translator> = Lazy::new(Translator::new);
 
 pub fn translate_letter(c: &char) -> Option<Letter> {
