@@ -161,7 +161,7 @@ pub fn evaluate_combinations(worker_information: WorkerInformation) {
                     );
 
                     // move the local passed vector to the shared vector
-                    *pass_vector.lock().expect(&format!("snapshot thread paniced while holding pass_vector mutex for worker thread {}", thread::current().name().unwrap_or("unnamed"))) = Some(passed_local);
+                    *pass_vector.lock().unwrap_or_else(|_| panic!("snapshot thread paniced while holding pass_vector mutex for worker thread {}", thread::current().name().unwrap_or("unnamed"))) = Some(passed_local);
 
                     // it's possible for all_combinations_generated to be set after some workers have stopped
                     // for a snapshot but not all, so we need to be compatible with the normal start / stop
@@ -225,7 +225,7 @@ pub fn evaluate_combinations(worker_information: WorkerInformation) {
                         batch_count = 0;
 
                         // move the local passed vector to the shared vector
-                        *pass_vector.lock().expect(&format!("snapshot thread paniced while holding pass_vector mutex for worker thread {}", thread::current().name().unwrap_or("unnamed"))) = Some(passed_local);
+                        *pass_vector.lock().unwrap_or_else(|_| panic!("snapshot thread paniced while holding pass_vector mutex for worker thread {}", thread::current().name().unwrap_or("unnamed"))) = Some(passed_local);
                         passed_local = Vec::new();
 
                         // check snapshot invariant (queues empty)

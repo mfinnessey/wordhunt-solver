@@ -34,9 +34,9 @@ pub enum Letter {
     Z = 25,
 }
 
-impl Into<usize> for Letter {
-    fn into(self) -> usize {
-        self as usize
+impl From<Letter> for usize {
+    fn from(val: Letter) -> Self {
+        val as usize
     }
 }
 
@@ -116,6 +116,12 @@ pub fn letter_to_char(letter: &Letter) -> char {
 pub struct Translator {
     letter_map: HashMap<char, Letter>,
     char_map: HashMap<Letter, char>,
+}
+
+impl Default for Translator {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl Translator {

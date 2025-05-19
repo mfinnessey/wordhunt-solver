@@ -47,7 +47,7 @@ pub struct CombinationSearch<'a> {
     terminator: Arc<Mutex<bool>>,
 }
 
-impl<'a> CombinationSearch<'a> {
+impl CombinationSearch<'_> {
     /// spawn threads to create combination evaluation architecture
     pub fn evaluate_combinations<Generator, GeneratorCreatorClosure>(
         self,

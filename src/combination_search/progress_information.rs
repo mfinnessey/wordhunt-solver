@@ -53,7 +53,7 @@ impl ProgressInformation {
         batch_pass_count: u64,
         batch_evaluated_count: u64,
         next_combination: Option<&LetterCombination>,
-        mut snapshots_directory: PathBuf,
+        snapshots_directory: PathBuf,
         print_statistics: bool,
     ) {
         // update state
@@ -81,7 +81,7 @@ impl ProgressInformation {
             Err(e) => panic!(
                 "failed to write progress information to disk at {} due to error: {}",
                 snapshot_path.display(),
-                e.to_string()
+                e
             ),
         }
 

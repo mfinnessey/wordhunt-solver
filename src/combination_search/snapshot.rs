@@ -177,10 +177,12 @@ pub fn take_snapshots(
         // aggregate worker vectors for a single write
         let mut passing_results: Vec<PassMsg> = Vec::new();
         for (thread_num, mutex) in worker_pass_vectors.iter().enumerate() {
-            let mut worker_vec_guard = mutex.lock().expect(&format!(
-                "worker thread {} paniced while holding its pass_vector mutex",
-                thread_num
-            ));
+            let mut worker_vec_guard = mutex.lock().unwrap_or_else(|_| {
+                panic!(
+                    "worker thread {} paniced while holding its pass_vector mutex",
+                    thread_num
+                )
+            });
             match *worker_vec_guard {
                 Some(ref populated_vec) => {
                     passing_results.extend(populated_vec.iter());
@@ -218,7 +220,7 @@ pub fn take_snapshots(
             Err(e) => panic!(
                 "write of serialized pass vectors to disk at {} failed due to error: {}",
                 snapshot_path.display(),
-                e.to_string()
+                e
             ),
         }
 

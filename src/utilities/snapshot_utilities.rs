@@ -29,15 +29,16 @@ pub fn aggregate_snapshots_from_directory<P: AsRef<Path>>(
             continue;
         }
         // ignore non-snapshot files
-        let file_path_as_string =
-            file_path
-                .clone()
-                .into_os_string()
-                .into_string()
-                .expect(&format!(
+        let file_path_as_string = file_path
+            .clone()
+            .into_os_string()
+            .into_string()
+            .unwrap_or_else(|_| {
+                panic!(
                     "failed to convert file path {} into a utf-8 string",
                     file_path.display()
-                ));
+                )
+            });
         if !snapshot_file_regex.is_match(&file_path_as_string) {
             continue;
         }
@@ -112,15 +113,16 @@ pub fn read_next_progress_information_from_directory<P: AsRef<Path>>(
             continue;
         }
         // ignore non-next combination files
-        let file_path_as_string =
-            file_path
-                .clone()
-                .into_os_string()
-                .into_string()
-                .expect(&format!(
+        let file_path_as_string = file_path
+            .clone()
+            .into_os_string()
+            .into_string()
+            .unwrap_or_else(|_| {
+                panic!(
                     "failed to convert filepath {} into a utf-8 string",
                     file_path.display()
-                ));
+                )
+            });
         if !progress_information_regex.is_match(&file_path_as_string) {
             continue;
         }
@@ -131,10 +133,12 @@ pub fn read_next_progress_information_from_directory<P: AsRef<Path>>(
                 .expect("failed to convert progress information filename into a utf-8 string");
 
             let num_slice = &file_name_str[..file_name_str.len() - progress_length];
-            let progress_information_num: u32 = num_slice.parse().expect(&format!(
-                "regex-validated number {} failed to parse as a number",
-                num_slice
-            ));
+            let progress_information_num: u32 = num_slice.parse().unwrap_or_else(|_| {
+                panic!(
+                    "regex-validated number {} failed to parse as a number",
+                    num_slice
+                )
+            });
 
             // retain the path to the maximal snapshot file that we've fouund so far (including the first)
             // the is_none check ensures that max_snapshot_num will be initialized with real data by
