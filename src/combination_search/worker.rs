@@ -33,10 +33,11 @@ pub struct WorkerInformation<'a> {
     /// the number of worker threads that are running - used to determine which thread is the last to stop for a snapshot.
     num_running_workers: Arc<Mutex<usize>>,
     /// the number of workers that are active (i.e. haven't returned) - used to cover the pathological case where
-    /// 1) a snapshot is triggered between generation completion and run completion 2) workers are split between
-    /// termination and snapshotting 3) workers are not rescheduled to complete before the next snapshot 4) the
-    /// snapshot thread blocks on a condvar that will never be signaled as the full complement of workers will never
-    /// decrement num_running_workers again for a worker to be the "last" worker.
+    /// 1) a snapshot is triggered between generation completion and run completion
+    /// 2) workers are split between termination and snapshotting
+    /// 3) workers are not rescheduled to complete before the next snapshot
+    /// 4) the snapshot thread blocks on a condvar that will never be signaled as the full complement of workers will never
+    ///    decrement num_running_workers again for a worker to be the "last" worker.
     num_active_workers: Arc<Mutex<usize>>,
     /// set by the snapshot thread to notify the worker threads that the snapshot has been completed
     snapshot_complete: Arc<(Mutex<bool>, Condvar)>,
