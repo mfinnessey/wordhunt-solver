@@ -1,4 +1,4 @@
-use once_cell::sync::Lazy;
+use std::sync::LazyLock;
 use std::collections::HashMap;
 use std::fmt;
 
@@ -80,7 +80,7 @@ impl fmt::Display for Letter {
     }
 }
 
-static TRANSLATOR: Lazy<Translator> = Lazy::new(Translator::new);
+static TRANSLATOR: LazyLock<Translator> = LazyLock::new(Translator::new);
 
 pub fn translate_letter(c: &char) -> Option<Letter> {
     TRANSLATOR.translate_letter(c)
