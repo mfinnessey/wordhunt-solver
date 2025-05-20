@@ -238,7 +238,6 @@ pub fn take_snapshots(
             batch_pass_count as u64,
             batch_evaluated_count,
             next_combination.as_ref(),
-            snapshots_directory.to_path_buf(),
             true,
         );
 

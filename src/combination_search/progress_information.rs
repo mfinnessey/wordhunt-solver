@@ -53,7 +53,6 @@ impl ProgressInformation {
         batch_pass_count: u64,
         batch_evaluated_count: u64,
         next_combination: Option<&LetterCombination>,
-        snapshots_directory: PathBuf,
         print_statistics: bool,
     ) {
         // update state
@@ -74,7 +73,7 @@ impl ProgressInformation {
             bincode::serialize(&self).expect("serialization of progress_information failed");
         let progress_information_name =
             self.snapshot_num.to_string() + PROGRESS_SNAPSHOT_IDENTIFIER;
-        let mut snapshot_path = snapshots_directory;
+        let mut snapshot_path = self.snapshots_directory.clone();
         snapshot_path.push(progress_information_name);
         match fs::write(&snapshot_path, encoded_progress_information) {
             Ok(_) => (),

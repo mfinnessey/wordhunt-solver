@@ -287,17 +287,13 @@ mod tests {
 
     #[test]
     fn test_read_next_progress_information_from_directory() {
-        let test_dir = TEMP_DIR.to_owned() + "test_read_next_progress_information_from_directory";
-        let _cleanup = TestCleanup::new(test_dir.clone());
-
-        create_dir(test_dir.clone()).unwrap();
-
         // dump a bunch of progress information files
         const NUM_PROGRESS_INFORMATION_FILES: usize = 131;
         let mut frequencies = ALL_A_FREQUENCIES;
         let mut to_idx = 1;
         let mut lc = LetterCombination::new(frequencies);
         let mut progress_info = ProgressInformation::new(SystemTime::now(), lc);
+	let _cleanup = TestCleanup::new(progress_info.get_snapshots_directory().clone());
         let mut batch_pass_count = 5;
         let mut batch_evaluated_count = 10;
         for i in 0..NUM_PROGRESS_INFORMATION_FILES {
@@ -308,7 +304,6 @@ mod tests {
                 batch_pass_count,
                 batch_evaluated_count,
                 Some(&lc),
-                test_dir.clone().into(),
                 true,
             );
 
@@ -324,26 +319,33 @@ mod tests {
         }
 
         // throw in a bogus file for grins
-        fs::write(test_dir.clone() + "/foo", "foo").unwrap();
+	let mut bogus_file_path = progress_info.get_snapshots_directory().clone();
+	bogus_file_path.push("foo");
+	println!("{}", bogus_file_path.display());
+        fs::write(bogus_file_path, "foo").unwrap();
 
-        let expected_result = ((NUM_PROGRESS_INFORMATION_FILES) as u32, progress_info);
+        let expected = ((NUM_PROGRESS_INFORMATION_FILES) as u32, &progress_info);
+	let actual = read_next_progress_information_from_directory(progress_info.get_snapshots_directory()).unwrap();
         assert_eq!(
-            read_next_progress_information_from_directory(&test_dir).unwrap(),
-            expected_result
+            (actual.0, &actual.1),
+            expected
         );
 
         // test that we still get the same result if we're missing some files
         for i in 0..NUM_PROGRESS_INFORMATION_FILES {
             if i % 2 != 0 {
+		let mut snapshot_file_path = progress_info.get_snapshots_directory().clone();
+		snapshot_file_path.push(i.to_string() + PROGRESS_SNAPSHOT_IDENTIFIER);
                 fs::remove_file(
-                    test_dir.clone() + "/" + &i.to_string() + PROGRESS_SNAPSHOT_IDENTIFIER,
+                    snapshot_file_path
                 )
                 .unwrap();
             }
         }
+	let actual = read_next_progress_information_from_directory(progress_info.get_snapshots_directory()).unwrap();
         assert_eq!(
-            read_next_progress_information_from_directory(&test_dir).unwrap(),
-            expected_result
+            (actual.0, &actual.1),
+            expected
         );
     }
 }
