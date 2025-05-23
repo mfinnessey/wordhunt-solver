@@ -1,12 +1,14 @@
 use std::env;
 use std::sync::{Arc, Mutex};
 
+use wordhunt_solver::board::Board;
 use wordhunt_solver::combination_search::combination_generator::SequentialLetterCombinationGenerator;
 use wordhunt_solver::combination_search::{
     bounding_functions::combination_score_all_possible_words_with_scores_tiled, CombinationSearch,
 };
-use wordhunt_solver::utilities::create_word_vector_with_scores;
+use wordhunt_solver::letter::{translate_letter, Letter};
 use wordhunt_solver::utilities::snapshot_utilities::read_next_progress_information_from_directory;
+use wordhunt_solver::utilities::{create_trie, create_word_vector_with_scores, TILE_COUNT};
 
 fn main() {
     let args: Vec<String> = env::args().collect();
@@ -28,20 +30,41 @@ fn main() {
 	n => panic!("usage is path/to/wordlist [/path/to/snapshots/directory] but you provided {} arguments", n - 1),
     };
 
-    // read wordlist into trie
+    // read wordlist into vector
     let word_list_filepath: &str = &args[1];
     println!("reading words from {} into word trie.", word_list_filepath);
-    let (word_vector_with_scores, word_count) = create_word_vector_with_scores(word_list_filepath);
+    let (word_vector_with_scores, word_vector_word_count) =
+        create_word_vector_with_scores(word_list_filepath);
     println!(
         "finished creating word trie containing {} words.",
-        word_count
+        word_vector_word_count
     );
 
+    // verify target score
+    const TARGET_SCORE: u32 = 1640;
+
+    // grid from https://www.youtube.com/watch?v=3cgr_GgA5ns
+    let (trie, trie_word_count) = create_trie(word_list_filepath);
+    assert_eq!(trie_word_count, word_vector_word_count);
+    let test_board_chars = [
+        'M', 'H', 'O', 'N', 'I', 'T', 'E', 'R', 'L', 'A', 'S', 'N', 'S', 'E', 'R', 'U',
+    ];
+    let test_board_letters: [Letter; TILE_COUNT] = test_board_chars
+        .into_iter()
+        .filter_map(|c| translate_letter(&c))
+        .collect::<Vec<Letter>>()
+        .try_into()
+        .unwrap();
+    let mut test_board = Board::new(test_board_letters, &trie);
+    assert_eq!(test_board.maximum_score(), &TARGET_SCORE);
+
+    // set up early termination infrastructure
     let combination_terminator: Arc<Mutex<bool>> = Arc::new(Mutex::new(false));
     let combination_terminator_ref = combination_terminator.clone();
     ctrlc::set_handler(move || *combination_terminator_ref.lock().expect("another thread erroneously accessed and paniced while holding the combination terminator") = true)
         .expect("FAILED TO SET CTRL-C HANDLER");
 
+    // launch combination evaluation
     let num_threads = match std::thread::available_parallelism() {
         Ok(n) => n.get(),
         Err(e) => panic!("failed to get available parllelism due to error: {}", e),
@@ -63,20 +86,4 @@ fn main() {
         progress_information,
         combination_generator_creator,
     );
-
-    // temporary test grid from https://www.youtube.com/watch?v=3cgr_GgA5ns
-    /*    let test_board_chars = ['M', 'H', 'O', 'N', 'I', 'T', 'E', 'R', 'L', 'A', 'S', 'N', 'S', 'E', 'R', 'U'];
-    let test_board_letters: [Letter; 16] = test_board_chars.into_iter().filter_map(|c| translate_letter(&c)).collect::<Vec<Letter>>().try_into().unwrap();
-    let mut letter_counts: [u8; 26] = [0; 26];
-    for letter in test_board_letters.iter() {
-    letter_counts[letter.clone() as usize] += 1;
-    }
-    println!("Maximum possible score for test board letters is {}.", get_combination_score(&trie, letter_counts));
-
-    let mut test_board = Board::new(test_board_letters, &trie);
-
-    println!("Score for test board is {}", test_board.maximum_score() * 100);
-    let mut words = test_board.get_words();
-    words.sort_by_key(|a| a.len());
-    println!("Words in board are {:?}", words); */
 }
