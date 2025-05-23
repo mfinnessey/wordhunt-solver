@@ -1,6 +1,6 @@
-use std::sync::LazyLock;
 use std::collections::HashMap;
 use std::fmt;
+use std::sync::LazyLock;
 
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 /// simplify storage as our grammar consists of only upper case english letters
