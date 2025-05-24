@@ -84,7 +84,7 @@ pub fn create_word_vector(word_list_file_path: &str) -> (Vec<[u8; ALPHABET_LENGT
                 Ok(word) => {
                     let mut freqs = [0; ALPHABET_LENGTH];
                     for letter in word {
-                        freqs[letter as usize] += 1;
+                        freqs[<Letter as Into<usize>>::into(letter)] += 1;
                     }
                     results.push(freqs);
                 }
@@ -117,9 +117,10 @@ pub fn create_word_vector_with_scores(
                 Ok(word) => {
                     let mut freqs = [0; ALPHABET_LENGTH];
                     for letter in word {
-                        freqs[letter as usize] += 1;
+                        freqs[<Letter as Into<usize>>::into(letter)] += 1;
                     }
-                    results.push((freqs, POINTS[freqs.iter().sum::<u8>() as usize]));
+                    // sum will be <= 16 and thus not overflow
+                    results.push((freqs, POINTS[<u8 as Into<usize>>::into(freqs.iter().sum())]));
                 }
                 // fail brutally with invalid word-lists
                 Err(e) => panic!("unable to process word {} because {e:?}", line),

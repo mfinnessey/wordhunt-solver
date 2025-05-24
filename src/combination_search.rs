@@ -131,7 +131,9 @@ impl CombinationSearch<'_> {
 
         crossbeam_thread::scope(|s| {
             // spawn the generator thread
-            let max_target_queue_size = 2 * self.num_worker_threads * PULL_LIMIT;
+            let max_target_queue_size =
+                <usize as TryInto<u64>>::try_into(2 * self.num_worker_threads * PULL_LIMIT)
+                    .expect("max_target_queue_size will not fit in a usize");
             let global_queue_ref_for_generator = global_queue_ref.clone();
             let all_combinations_generated = &all_combinations_generated;
             let stop_for_snapshot = &stop_for_snapshot;

@@ -10,7 +10,7 @@ use std::{thread, time};
 pub fn generate_combinations(
     combinations: impl Iterator<Item = LetterCombination>,
     queue: Arc<Injector<LetterCombination>>,
-    max_target_queue_size: usize,
+    max_target_queue_size: u64,
     all_combinations_generated: Arc<RwLock<bool>>,
     stop_for_snapshot: &AtomicBool,
     generator_thread_stopped: Arc<RwLock<bool>>,
@@ -24,8 +24,8 @@ pub fn generate_combinations(
     for combination in combinations {
         // block the generator thread if the queue is ludicrously big.
         let mut stopped = false;
-        while local_batch_count % (max_target_queue_size as u64) == 0
-            && queue.len() >= max_target_queue_size
+        while local_batch_count % max_target_queue_size == 0
+            && queue.len() >= (max_target_queue_size as usize)
         {
             if !stopped {
                 println!("Generator ran ahead, sleeping for now.");

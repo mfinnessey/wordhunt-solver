@@ -42,6 +42,7 @@ impl<'a> Board<'a> {
             let visited_mask: u16 = 1 << position;
             let mut search = self.dictionary.inc_search();
             search.query(&self.tiles[position]);
+            // coercion is safe as position is limited to 0 through 15
             self.search_stack
                 .push((visited_mask, position as u8, search));
         }
@@ -117,7 +118,7 @@ impl<'a> Board<'a> {
         // extend the search with the new letter
         let mut new_search = search.clone();
         let postfixes_exist;
-        let tile = self.tiles[candidate_position as usize].clone();
+        let tile = self.tiles[<u8 as Into<usize>>::into(candidate_position)].clone();
         match new_search.query(&tile) {
             Some(Answer::Prefix) => {
                 postfixes_exist = true;
