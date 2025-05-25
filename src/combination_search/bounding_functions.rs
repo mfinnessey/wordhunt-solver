@@ -129,13 +129,17 @@ pub fn combination_score_all_possible_words_with_scores_tiled(
 ) -> [u32; BATCH_SIZE] {
     let mut scores = [0; BATCH_SIZE];
 
-    // FIXME adjust based on separate i/d caches
+    // need to reserve space for the scores array (16 KB)
     // sizeof each element is 26 * 8 + 8 = 216b
-    // l1 cache on zen5 is 80 KB / core while l2 is 1 MB / core
-    // with smt, assume that each thread has access to half the cahce
-    // attempt to keep everything in l1 cache for first iteration
-    // implies tile sizes of <= 370 elements
-    const DICTIONARY_TILE_SIZE: usize = 350;
+    // l1 data cache on zen5 is 48 KB / core while l2 is 1 MB / core
+    // with smt, assume that each thread has access to half the cache
+    // attempt to keep everything in l1 cache (should optimize this,
+    // but that's another project ;)
+    // 48 KB / 2 = 24 KB
+    // 24 KB - 16 KB = 8 KB
+    // 8 KB / 27B -> 296 items
+    // round down to 290 to leave a little extra cache space
+    const DICTIONARY_TILE_SIZE: usize = 290;
     let mut tile_base = 0;
 
     while tile_base + DICTIONARY_TILE_SIZE < words.len() {
