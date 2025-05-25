@@ -41,7 +41,7 @@ fn main() {
     );
 
     // verify target score
-    const TARGET_SCORE: u32 = 1640;
+    const TARGET_SCORE: u32 = 5354;
 
     // grid from https://www.youtube.com/watch?v=3cgr_GgA5ns
     let (trie, trie_word_count) = create_trie(word_list_filepath);
