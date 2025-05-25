@@ -13,7 +13,7 @@ pub const TILE_COUNT: usize = 16;
 
 pub const ALPHABET_LENGTH: usize = 26;
 
-/// number of letter combinations to evaluate at once
+/// number of letter combinations to evaluate at once - chosen essentially arbitrarily
 pub const BATCH_SIZE: usize = 500;
 
 /// the starting value of the iterator over all letter combinations
