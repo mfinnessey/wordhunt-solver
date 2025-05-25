@@ -22,8 +22,8 @@ pub mod progress_information;
 mod snapshot;
 mod worker;
 
-// TODO benchmark this if need be
 /// the maximum batch size that a worker thread will pull from the global queue at once
+/// this isn't scientific, but seems reasonable enough
 const PULL_LIMIT: usize = 10_000;
 
 /// time to wait between starting the generator thread and the worker threads to limit

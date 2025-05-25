@@ -118,7 +118,6 @@ impl ProgressInformation {
         let overall_combinations_per_hour =
             (self.evaluated_count as f64) / (overall_elapsed_time_hours);
 
-        // TODO compute this...
         const TOTAL_COMBINATIONS_COUNT: u64 = 103_077_446_706;
         let remaining_combinations_count = TOTAL_COMBINATIONS_COUNT - self.evaluated_count;
         let remaining_combinations_percentage: f64 =
