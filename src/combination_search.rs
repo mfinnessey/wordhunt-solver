@@ -7,7 +7,7 @@ use snapshot::take_snapshots;
 use std::path::PathBuf;
 use std::time::SystemTime;
 use std::{thread, time};
-use worker::{evaluate_combinations, WorkerInformation};
+use worker::{evaluate_combinations, SharedWorkerInformation};
 
 use crossbeam::thread::ScopedJoinHandle;
 use crossbeam_deque::{Injector, Stealer, Worker};
@@ -126,76 +126,76 @@ impl CombinationSearch<'_> {
             generator_snapshot_complete_condvar,
         ));
 
-        let stealers_vec_ref = Arc::new(stealers);
-        let global_queue_ref = Arc::new(global_queue);
+        let stealers_vec = Arc::new(stealers);
+        let global_queue = Arc::new(global_queue);
+
+        let shared_worker_information = SharedWorkerInformation::new(
+            self.word_list,
+            self.metric,
+            self.target,
+            global_queue.clone(),
+            stealers_vec,
+            all_combinations_generated.clone(),
+            &stop_for_snapshot,
+            generator_thread_stopped.clone(),
+            workers_stopped.clone(),
+            num_running_workers.clone(),
+            num_active_workers.clone(),
+            workers_snapshot_complete.clone(),
+            aborting_early.clone(),
+        );
 
         crossbeam_thread::scope(|s| {
             // spawn the generator thread
-            let max_target_queue_size =
-                <usize as TryInto<u64>>::try_into(2 * self.num_worker_threads * PULL_LIMIT)
-                    .expect("max_target_queue_size will not fit in a usize");
-            let global_queue_ref_for_generator = global_queue_ref.clone();
-            let all_combinations_generated = &all_combinations_generated;
-            let stop_for_snapshot = &stop_for_snapshot;
-            let generator_thread_stopped = &generator_thread_stopped;
-            let workers_stopped = &workers_stopped;
-            let generator_snapshot_complete = &generator_snapshot_complete;
-            let next_combination = &next_combination;
-            let batch_count = &batch_count;
-            let aborting_early = &aborting_early;
             let generator = combinations_generator_creator(
                 initial_letter_combination.expect("no initial letter combination"),
             );
+            let global_queue_for_generator = global_queue.clone();
+            let max_target_queue_size =
+                <usize as TryInto<u64>>::try_into(2 * self.num_worker_threads * PULL_LIMIT)
+                    .expect("max_target_queue_size will not fit in a usize");
+
+            let all_combinations_generated = &all_combinations_generated;
+            let stop_for_snapshot = &stop_for_snapshot;
+            let generator_thread_stopped = &generator_thread_stopped;
+            let generator_snapshot_complete = &generator_snapshot_complete;
+            let aborting_early = &aborting_early;
+            let next_combination = &next_combination;
+            let batch_count = &batch_count;
             let generator_handle = s.spawn(move |_| {
                 generate_combinations(
                     generator,
-                    global_queue_ref_for_generator,
+                    global_queue_for_generator,
                     max_target_queue_size,
-                    Arc::clone(all_combinations_generated),
+                    all_combinations_generated.clone(),
                     stop_for_snapshot,
-                    Arc::clone(generator_thread_stopped),
-                    Arc::clone(generator_snapshot_complete),
-                    Arc::clone(aborting_early),
-                    Arc::clone(next_combination),
-                    Arc::clone(batch_count),
+                    generator_thread_stopped.clone(),
+                    generator_snapshot_complete.clone(),
+                    aborting_early.clone(),
+                    next_combination.clone(),
+                    batch_count.clone(),
                 )
             });
 
             thread::sleep(SPIN_UP_WAIT);
 
+            // spawn worker threads
             let mut worker_threads: Vec<ScopedJoinHandle<'_, ()>> = Vec::new();
-            println!("Spawning {} worker threads.", self.num_worker_threads);
+            println!("spawning {} worker threads.", self.num_worker_threads);
             for (thread_num, pass_vector) in pass_vectors
                 .iter()
                 .enumerate()
                 .take(self.num_worker_threads)
             {
                 let thread_worker = workers.pop().expect("missing element in workers vector");
-                let stealers_ref = stealers_vec_ref.clone();
-                let global_ref = global_queue_ref.clone();
-
-                // TODO clone this struct and separate non-shared stuff out
-                let worker_information = WorkerInformation::new(
-                    self.word_list,
-                    self.metric,
-                    self.target,
-                    thread_worker,
-                    global_ref,
-                    stealers_ref,
-                    pass_vector.clone(),
-                    Arc::clone(all_combinations_generated),
-                    stop_for_snapshot,
-                    Arc::clone(generator_thread_stopped),
-                    Arc::clone(workers_stopped),
-                    Arc::clone(&num_running_workers),
-                    Arc::clone(&num_active_workers),
-                    Arc::clone(&workers_snapshot_complete),
-                    Arc::clone(aborting_early),
-                );
+                let shared_worker_information = shared_worker_information.clone();
+                let pass_vector = pass_vector.clone();
                 let handle = s
                     .builder()
                     .name(thread_num.to_string())
-                    .spawn(move |_| evaluate_combinations(worker_information))
+                    .spawn(move |_| {
+                        evaluate_combinations(shared_worker_information, thread_worker, pass_vector)
+                    })
                     .expect("failed to spawn worker thread");
                 worker_threads.push(handle);
             }
@@ -206,29 +206,30 @@ impl CombinationSearch<'_> {
                     progress_information,
                     snapshot_frequency,
                     stop_for_snapshot,
-                    Arc::clone(workers_stopped),
-                    Arc::clone(generator_thread_stopped),
-                    Arc::clone(&workers_snapshot_complete),
-                    Arc::clone(generator_snapshot_complete),
-                    Arc::clone(all_combinations_generated),
+                    workers_stopped.clone(),
+                    generator_thread_stopped.clone(),
+                    workers_snapshot_complete.clone(),
+                    generator_snapshot_complete.clone(),
+                    all_combinations_generated.clone(),
                     pass_vectors,
-                    Arc::clone(&num_running_workers),
-                    Arc::clone(&num_active_workers),
-                    global_queue_ref,
-                    Arc::clone(next_combination),
-                    Arc::clone(batch_count),
+                    num_running_workers.clone(),
+                    num_active_workers.clone(),
+                    global_queue,
+                    next_combination.clone(),
+                    batch_count.clone(),
                     self.terminator,
-                    Arc::clone(aborting_early),
+                    aborting_early.clone(),
                 )
             });
 
+            // join threads
             if generator_handle.join().is_err() {
-                panic!("Generator thread paniced!")
+                panic!("generator thread paniced!")
             }
 
             for worker_thread_handle in worker_threads {
                 if worker_thread_handle.join().is_err() {
-                    panic!("Worker thread paniced!")
+                    panic!("worker thread paniced!")
                 }
             }
 
@@ -322,8 +323,10 @@ mod tests {
 
         // spawn a thread in the background to set terminator to true in say 10 seconds
         const TERMINATOR_SET_DELAY_SECS: u64 = 45;
-        let terminator_ref = terminator.clone();
-        thread::spawn(move || set_terminator_in_secs(terminator_ref, &TERMINATOR_SET_DELAY_SECS));
+        {
+            let terminator = terminator.clone();
+            thread::spawn(move || set_terminator_in_secs(terminator, &TERMINATOR_SET_DELAY_SECS));
+        }
 
         let fake_combination_generator_closure =
             |lc: LetterCombination| FakeLetterCombinationGenerator::new(lc, COMBINATION_COUNT);

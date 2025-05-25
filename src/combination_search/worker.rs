@@ -8,18 +8,16 @@ use crossbeam_deque::{Injector, Stealer, Worker};
 use std::sync::atomic::{AtomicBool, Ordering as MemoryOrdering};
 use std::sync::{Arc, Condvar, Mutex, RwLock};
 
-/// the information that a worker thread is provided with to process combinations
+/// the shared information that a worker thread is provided with to process combinations
 /// in conjunction with the overall program.
-pub struct WorkerInformation<'a> {
-    word_list: &'a Vec<([u8; ALPHABET_LENGTH], u8)>,
+#[derive(Clone)]
+pub struct SharedWorkerInformation<'a> {
+    word_list_with_scores: &'a Vec<([u8; ALPHABET_LENGTH], u8)>,
     metric: EvaluationMetric,
     target: u32,
-    /// queue accessors
-    local: Worker<LetterCombination>,
+    /// shared queue accessors
     global: Arc<Injector<LetterCombination>>,
     stealers: Arc<Vec<Stealer<LetterCombination>>>,
-    /// where the worker stores its passing combinations for a given batch (to eventually be snapshotted by the generator thread)
-    pass_vector: Arc<Mutex<Option<Vec<PassMsg>>>>,
     /// synchronization stuff
     /// all combinations have been generated - the condition that will ultimately terminate each thread
     all_combinations_generated: Arc<RwLock<bool>>,
@@ -44,18 +42,14 @@ pub struct WorkerInformation<'a> {
     /// set if aborting early (e.g. for ctrl-c)
     aborting_early: Arc<RwLock<bool>>,
 }
-
-impl<'a> WorkerInformation<'a> {
-    // this object's constructor is designed to simplify the signature of evaluate_combinations
+impl<'a> SharedWorkerInformation<'a> {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         word_list: &'a Vec<([u8; ALPHABET_LENGTH], u8)>,
         metric: EvaluationMetric,
         target: u32,
-        local: Worker<LetterCombination>,
         global: Arc<Injector<LetterCombination>>,
         stealers: Arc<Vec<Stealer<LetterCombination>>>,
-        pass_vector: Arc<Mutex<Option<Vec<PassMsg>>>>,
         all_combinations_generated: Arc<RwLock<bool>>,
         stop_for_snapshot: &'a AtomicBool,
         generator_thread_stopped: Arc<RwLock<bool>>,
@@ -66,12 +60,10 @@ impl<'a> WorkerInformation<'a> {
         aborting_early: Arc<RwLock<bool>>,
     ) -> Self {
         Self {
-            word_list,
+            word_list_with_scores: word_list,
             metric,
             target,
-            local,
             global,
-            pass_vector,
             stealers,
             all_combinations_generated,
             stop_for_snapshot,
@@ -85,15 +77,17 @@ impl<'a> WorkerInformation<'a> {
     }
 }
 
-pub fn evaluate_combinations(worker_information: WorkerInformation) {
+pub fn evaluate_combinations(
+    worker_information: SharedWorkerInformation,
+    local: Worker<LetterCombination>,
+    pass_vector: Arc<Mutex<Option<Vec<PassMsg>>>>,
+) {
     // unpack convenience struct
-    let word_list = worker_information.word_list;
+    let word_list = worker_information.word_list_with_scores;
     let metric = worker_information.metric;
     let target = worker_information.target;
-    let local = worker_information.local;
     let global = worker_information.global;
     let stealers = worker_information.stealers;
-    let pass_vector = worker_information.pass_vector;
     let all_combinations_generated = worker_information.all_combinations_generated;
     let stop_for_snapshot = worker_information.stop_for_snapshot;
     let generator_thread_stopped = worker_information.generator_thread_stopped;
