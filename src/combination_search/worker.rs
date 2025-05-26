@@ -228,13 +228,15 @@ pub fn evaluate_combinations(
                             if *running_worker_count == 0 {
                                 notify_snapshot_thread_all_workers_stopped(&workers_stopped);
                                 println!(
-                                    "worker thread {} stopped for snapshot (last thread)",
-                                    thread::current().name().unwrap_or("unnamed")
+                                    "worker thread {} stopped for snapshot (last thread) with {} passed",
+                                    thread::current().name().unwrap_or("unnamed"),
+				    passed_count
                                 );
                             } else {
                                 println!(
-                                    "worker thread {} stopped for snapshot",
-                                    thread::current().name().unwrap_or("unnamed")
+                                    "worker thread {} stopped for snapshot with {} passed",
+                                    thread::current().name().unwrap_or("unnamed"),
+                                    passed_count
                                 );
                             }
                         }

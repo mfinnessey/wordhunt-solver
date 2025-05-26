@@ -157,7 +157,7 @@ pub fn take_snapshots(
         // check that a snapshot invariant (empty queues at completion) has been satisfied
         if !global_queue.is_empty() {
             panic!(
-                "Global queue was not empty ({} combination(s)) at end of snapshot",
+                "global queue was not empty ({} combination(s)) at end of snapshot",
                 global_queue.len()
             );
         }
@@ -173,9 +173,9 @@ pub fn take_snapshots(
             is_last_snapshot = true;
         }
 
-        // write the snapshot to disk
-        // aggregate worker vectors for a single write
-        let mut passing_results: Vec<PassMsg> = Vec::new();
+        // write the snapshot to disk in pieces to avoid memory pressure
+        // (combining oom'd this with 64 GB memory on fedora 42)
+        let mut batch_pass_count = 0;
         for (thread_num, mutex) in worker_pass_vectors.iter().enumerate() {
             let mut worker_vec_guard = mutex.lock().unwrap_or_else(|_| {
                 panic!(
@@ -185,7 +185,28 @@ pub fn take_snapshots(
             });
             match *worker_vec_guard {
                 Some(ref populated_vec) => {
-                    passing_results.extend(populated_vec.iter());
+                    batch_pass_count += populated_vec.len();
+
+                    // compress the results to save disk space
+                    let encoded_passing_results = bincode::serialize(&populated_vec)
+                        .expect("failed to serialize passing results");
+                    // for snapshot 2 on worker thread 5 would be 2W5
+                    let snapshot_name = progress_information.get_snapshot_number().to_string()
+                        + "W"
+                        + &thread_num.to_string();
+                    let snapshots_directory = progress_information.get_snapshots_directory();
+                    let mut snapshot_path = snapshots_directory.to_path_buf();
+                    snapshot_path.push(snapshot_name);
+
+                    match fs::write(&snapshot_path, encoded_passing_results) {
+                        Ok(_) => (),
+                        Err(e) => panic!(
+			    "write of serialized pass vectors to disk at {} failed due to error: {}",
+			    snapshot_path.display(),
+			    e
+			),
+                    }
+
                     // reset to force the worker to repopulate
                     *worker_vec_guard = None;
                 }
@@ -203,25 +224,6 @@ pub fn take_snapshots(
                     // final snapshot
                 }
             }
-        }
-
-        let batch_pass_count = passing_results.len();
-
-        // write the passing results to the disk
-        let encoded_passing_results =
-            bincode::serialize(&passing_results).expect("failed to serialize passing results");
-        let snapshot_name = progress_information.get_snapshot_number().to_string();
-        let snapshots_directory = progress_information.get_snapshots_directory();
-        let mut snapshot_path = snapshots_directory.to_path_buf();
-        snapshot_path.push(snapshot_name);
-
-        match fs::write(&snapshot_path, encoded_passing_results) {
-            Ok(_) => (),
-            Err(e) => panic!(
-                "write of serialized pass vectors to disk at {} failed due to error: {}",
-                snapshot_path.display(),
-                e
-            ),
         }
 
         // write progress information to disk (the snapshot consists of the results up to this

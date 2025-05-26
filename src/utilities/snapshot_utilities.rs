@@ -3,7 +3,8 @@ use crate::combination_search::progress_information::{
 };
 use crate::combination_search::PassMsg;
 use regex::Regex;
-use std::collections::HashSet;
+use std::cmp::max;
+use std::collections::HashMap;
 use std::fs::{read, read_dir};
 use std::path::Path;
 
@@ -12,14 +13,16 @@ use std::path::Path;
 pub fn aggregate_snapshots_from_directory<P: AsRef<Path>>(
     directory: P,
 ) -> Result<Vec<PassMsg>, String> {
-    let snapshot_file_regex = match Regex::new(r"^*/[0-9]+$") {
+    let snapshot_file_regex = match Regex::new(r"^*/([0-9])+W([0-9])+$") {
         Ok(regex) => regex,
         Err(e) => panic!("failed to create snapshot_file regex due to error: {e}"),
     };
 
-    let mut seen_snapshot_numbers = HashSet::new();
+    let mut seen_snapshots: HashMap<u32, Vec<u32>> = HashMap::new();
     let mut pass_msgs: Vec<PassMsg> = Vec::new();
 
+    let mut max_snapshot_num = 0;
+    let mut max_worker_num = 0;
     let files = read_dir(directory).map_err(|_e| "Could not read directory!")?;
     for file in files {
         let file = file.map_err(|_e| "Error reading file returned in directory")?;
@@ -39,22 +42,34 @@ pub fn aggregate_snapshots_from_directory<P: AsRef<Path>>(
                     file_path.display()
                 )
             });
-        if !snapshot_file_regex.is_match(&file_path_as_string) {
-            continue;
-        }
 
-        if let Some(file_name) = file_path.file_name() {
-            if let Ok(snapshot_number) = file_name
-                .to_str()
-                .expect("failed to convert snapshot filename to a utf-8 string")
-                .parse()
-            {
-                seen_snapshot_numbers.insert(snapshot_number);
-            } else {
-                return Err("Regex-validated file name did not parse as a number".to_string());
+        match snapshot_file_regex.captures(&file_path_as_string) {
+            Some(captures) => {
+                let snapshot_num_str = match captures.get(1) {
+                    Some(snapshot_num_match) => snapshot_num_match.as_str(),
+                    None => continue,
+                };
+                let snapshot_num = snapshot_num_str
+                    .parse()
+                    .expect("regex-validated snapshot number failed to parse");
+                let worker_num_str = match captures.get(2) {
+                    Some(worker_num_match) => worker_num_match.as_str(),
+                    None => continue,
+                };
+                let worker_num = worker_num_str
+                    .parse()
+                    .expect("regex-validated worker number failed to parse");
+
+                max_snapshot_num = max(snapshot_num, max_snapshot_num);
+                max_worker_num = max(worker_num, max_worker_num);
+
+                if let Some(worker_snapshot_numbers) = seen_snapshots.get_mut(&snapshot_num) {
+                    worker_snapshot_numbers.push(worker_num);
+                } else {
+                    seen_snapshots.insert(snapshot_num, vec![worker_num]);
+                }
             }
-        } else {
-            return Err("File has no name!".to_string());
+            None => continue,
         }
 
         let data = read(file_path).map_err(|_e| "Error reading file data")?;
@@ -62,26 +77,35 @@ pub fn aggregate_snapshots_from_directory<P: AsRef<Path>>(
         pass_msgs.append(deser);
     }
 
+    if max_snapshot_num == 0 {
+        return Err("READ NO SNAPSHOTS".to_string());
+    }
+
     // ensure that we're not missing any snapshots
-    let max_snapshot_num: u32 = *seen_snapshot_numbers
-        .iter()
-        .max()
-        .ok_or("READ NO SNAPSHOTS")?;
     let mut missing_snapshot_numbers = Vec::new();
+    let mut missing_snapshot_worker_pairs = Vec::new();
     // snapshots are 1-indexed
-    for i in 1..max_snapshot_num {
-        if !seen_snapshot_numbers.contains(&i) {
-            missing_snapshot_numbers.push(i);
+    for snapshot_num in 1..max_snapshot_num {
+        if let Some(worker_snapshot_numbers) = seen_snapshots.get(&snapshot_num) {
+            if snapshot_num != max_snapshot_num {
+                for worker_num in 0..max_worker_num {
+                    if !worker_snapshot_numbers.contains(&worker_num) {
+                        missing_snapshot_worker_pairs.push((snapshot_num, worker_num));
+                    }
+                }
+            }
+        } else {
+            missing_snapshot_numbers.push(snapshot_num);
         }
     }
 
-    if missing_snapshot_numbers.is_empty() {
-        println!("Read all {} 0-indexed snapshots", max_snapshot_num);
+    if missing_snapshot_numbers.is_empty() && missing_snapshot_worker_pairs.is_empty() {
+        println!("read all {} 0-indexed snapshots", max_snapshot_num);
         Ok(pass_msgs)
     } else {
         Err(format!(
-            "Missing snapshot numbers {:?}",
-            missing_snapshot_numbers
+            "missing snapshot numbers {:?} and (snapshot, worker) pairs {:?}",
+            missing_snapshot_numbers, missing_snapshot_worker_pairs
         ))
     }
 }
@@ -171,6 +195,7 @@ mod tests {
     use crate::letter_combination::LetterCombination;
     use crate::utilities::test_utilities::TestCleanup;
     use crate::utilities::{ALL_A_FREQUENCIES, TILE_COUNT};
+    use std::collections::HashSet;
     use std::fs;
     use std::fs::create_dir;
     use std::time::SystemTime;
@@ -181,34 +206,131 @@ mod tests {
     fn test_aggregate_snapshots_from_directory() {
         let test_dir = TEMP_DIR.to_owned() + "test_aggregate_snapshots_from_directory";
         let _cleanup = TestCleanup::new(test_dir.clone());
-        let mut v: Vec<PassMsg> = Vec::new();
-        let mut frequencies = ALL_A_FREQUENCIES;
+        let mut v0: Vec<PassMsg> = Vec::new();
+        let mut v1: Vec<PassMsg> = Vec::new();
+        let mut v2: Vec<PassMsg> = Vec::new();
+        let mut frequencies0 = ALL_A_FREQUENCIES;
+        let mut frequencies1 = ALL_A_FREQUENCIES;
+        let mut frequencies2 = ALL_A_FREQUENCIES;
         for i in 0..6 {
-            v.push((LetterCombination::new(frequencies), i));
-            frequencies[0] -= 1;
-            frequencies[1] += 1;
+            v0.push((LetterCombination::new(frequencies0), i));
+            v1.push((LetterCombination::new(frequencies1), i));
+            v2.push((LetterCombination::new(frequencies2), i));
+            frequencies0[0] -= 1;
+            frequencies0[1] += 1;
+            frequencies1[0] -= 1;
+            frequencies1[1] += 1;
+            frequencies2[0] -= 1;
+            frequencies2[2] += 1;
         }
 
-        // dump vector in heterogeneous but consecutive pieces a la snapshots
-
+        // dump vectors in heterogeneous pieces
         create_dir(test_dir.clone()).unwrap();
 
-        let vec1: Vec<PassMsg> = vec![v[0]];
-        let encoded1 = bincode::serialize(&vec1).unwrap();
-        fs::write(test_dir.clone() + "/1", encoded1).unwrap();
+        let vec1w0: Vec<PassMsg> = vec![v0[0]];
+        let encoded1w0 = bincode::serialize(&vec1w0).unwrap();
+        fs::write(test_dir.clone() + "/1W0", encoded1w0).unwrap();
+        let vec1w1: Vec<PassMsg> = vec![v1[0]];
+        let encoded1w1 = bincode::serialize(&vec1w1).unwrap();
+        fs::write(test_dir.clone() + "/1W1", encoded1w1).unwrap();
+        let encoded1w2 = bincode::serialize(&v2[0..2]).unwrap();
+        fs::write(test_dir.clone() + "/1W2", encoded1w2).unwrap();
 
-        let vec2 = &v[1..4].to_vec();
-        let encoded2 = bincode::serialize(&vec2).unwrap();
-        fs::write(test_dir.clone() + "/2", encoded2).unwrap();
+        let vec2w0 = &v0[1..4].to_vec();
+        let encoded2w0 = bincode::serialize(&vec2w0).unwrap();
+        fs::write(test_dir.clone() + "/2W0", encoded2w0).unwrap();
+        let vec2w1 = &v1[1..3].to_vec();
+        let encoded2w1 = bincode::serialize(&vec2w1).unwrap();
+        fs::write(test_dir.clone() + "/2W1", encoded2w1).unwrap();
+        let vec2w2 = &v2[2..4].to_vec();
+        let encoded2w2 = bincode::serialize(&vec2w2).unwrap();
+        fs::write(test_dir.clone() + "/2W2", encoded2w2).unwrap();
 
-        let vec3 = &v[4..6].to_vec();
-        let encoded3 = bincode::serialize(&vec3).unwrap();
-        fs::write(test_dir.clone() + "/3", encoded3).unwrap();
+        let vec3w0 = &v0[4..6].to_vec();
+        let encoded3w0 = bincode::serialize(&vec3w0).unwrap();
+        fs::write(test_dir.clone() + "/3W0", encoded3w0).unwrap();
+        let vec3w1 = &v1[3..6].to_vec();
+        let encoded3w1 = bincode::serialize(&vec3w1).unwrap();
+        fs::write(test_dir.clone() + "/3W1", encoded3w1).unwrap();
+        let vec3w2 = &v2[4..6].to_vec();
+        let encoded3w2 = bincode::serialize(&vec3w2).unwrap();
+        fs::write(test_dir.clone() + "/3W2", encoded3w2).unwrap();
 
         // throw in a bogus file for grins
         fs::write(test_dir.clone() + "/foo", "foo").unwrap();
 
-        assert_eq!(aggregate_snapshots_from_directory(test_dir).unwrap(), v);
+        let mut expected: HashSet<PassMsg> = HashSet::from_iter(v0);
+        expected.extend(v1);
+        expected.extend(v2);
+
+        let actual = HashSet::from_iter(aggregate_snapshots_from_directory(test_dir).unwrap());
+
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn test_aggregate_snapshots_from_directory_not_all_last_worker() {
+        let test_dir =
+            TEMP_DIR.to_owned() + "test_aggregate_snapshots_from_directory_not_all_last_worker";
+        let _cleanup = TestCleanup::new(test_dir.clone());
+        let mut v0: Vec<PassMsg> = Vec::new();
+        let mut v1: Vec<PassMsg> = Vec::new();
+        let mut v2: Vec<PassMsg> = Vec::new();
+        let mut frequencies0 = ALL_A_FREQUENCIES;
+        let mut frequencies1 = ALL_A_FREQUENCIES;
+        let mut frequencies2 = ALL_A_FREQUENCIES;
+        for i in 0..6 {
+            v0.push((LetterCombination::new(frequencies0), i));
+            v1.push((LetterCombination::new(frequencies1), i));
+            v2.push((LetterCombination::new(frequencies2), i));
+            frequencies0[0] -= 1;
+            frequencies0[1] += 1;
+            frequencies1[0] -= 1;
+            frequencies1[1] += 1;
+            frequencies2[0] -= 1;
+            frequencies2[2] += 1;
+        }
+
+        // dump vectors in heterogeneous pieces
+        create_dir(test_dir.clone()).unwrap();
+
+        let vec1w0: Vec<PassMsg> = vec![v0[0]];
+        let encoded1w0 = bincode::serialize(&vec1w0).unwrap();
+        fs::write(test_dir.clone() + "/1W0", encoded1w0).unwrap();
+        let vec1w1: Vec<PassMsg> = vec![v1[0]];
+        let encoded1w1 = bincode::serialize(&vec1w1).unwrap();
+        fs::write(test_dir.clone() + "/1W1", encoded1w1).unwrap();
+        let encoded1w2 = bincode::serialize(&v2[0..2]).unwrap();
+        fs::write(test_dir.clone() + "/1W2", encoded1w2).unwrap();
+
+        let vec2w0 = &v0[1..4].to_vec();
+        let encoded2w0 = bincode::serialize(&vec2w0).unwrap();
+        fs::write(test_dir.clone() + "/2W0", encoded2w0).unwrap();
+        let vec2w1 = &v1[1..3].to_vec();
+        let encoded2w1 = bincode::serialize(&vec2w1).unwrap();
+        fs::write(test_dir.clone() + "/2W1", encoded2w1).unwrap();
+        let vec2w2 = &v2[2..6].to_vec();
+        let encoded2w2 = bincode::serialize(&vec2w2).unwrap();
+        fs::write(test_dir.clone() + "/2W2", encoded2w2).unwrap();
+
+        let vec3w0 = &v0[4..6].to_vec();
+        let encoded3w0 = bincode::serialize(&vec3w0).unwrap();
+        fs::write(test_dir.clone() + "/3W0", encoded3w0).unwrap();
+        let vec3w1 = &v1[3..6].to_vec();
+        let encoded3w1 = bincode::serialize(&vec3w1).unwrap();
+        fs::write(test_dir.clone() + "/3W1", encoded3w1).unwrap();
+        // worker 2 terminated early - this is ok
+
+        // throw in a bogus file for grins
+        fs::write(test_dir.clone() + "/foo", "foo").unwrap();
+
+        let mut expected: HashSet<PassMsg> = HashSet::from_iter(v0);
+        expected.extend(v1);
+        expected.extend(v2);
+
+        let actual = HashSet::from_iter(aggregate_snapshots_from_directory(test_dir).unwrap());
+
+        assert_eq!(actual, expected);
     }
 
     #[test]
@@ -216,33 +338,170 @@ mod tests {
         let test_dir =
             TEMP_DIR.to_owned() + "test_aggregate_snapshots_from_directory_missing_snapshot";
         let _cleanup = TestCleanup::new(test_dir.clone());
-        let mut v: Vec<PassMsg> = Vec::new();
-        let mut frequencies = ALL_A_FREQUENCIES;
+        let mut v0: Vec<PassMsg> = Vec::new();
+        let mut v1: Vec<PassMsg> = Vec::new();
+        let mut v2: Vec<PassMsg> = Vec::new();
+        let mut frequencies0 = ALL_A_FREQUENCIES;
+        let mut frequencies1 = ALL_A_FREQUENCIES;
+        let mut frequencies2 = ALL_A_FREQUENCIES;
         for i in 0..6 {
-            v.push((LetterCombination::new(frequencies), i));
-            frequencies[0] -= 1;
-            frequencies[1] += 1;
+            v0.push((LetterCombination::new(frequencies0), i));
+            v1.push((LetterCombination::new(frequencies1), i));
+            v2.push((LetterCombination::new(frequencies2), i));
+            frequencies0[0] -= 1;
+            frequencies0[1] += 1;
+            frequencies1[0] -= 1;
+            frequencies1[1] += 1;
+            frequencies2[0] -= 1;
+            frequencies2[2] += 1;
         }
 
-        // dump vector in heterogeneous but consecutive pieces a la snapshots
+        // dump vectors in heterogeneous pieces
         create_dir(test_dir.clone()).unwrap();
 
-        let vec1: Vec<PassMsg> = vec![v[0]];
-        let encoded1 = bincode::serialize(&vec1).unwrap();
-        fs::write(test_dir.clone() + "/1", encoded1).unwrap();
+        let vec1w0: Vec<PassMsg> = vec![v0[0]];
+        let encoded1w0 = bincode::serialize(&vec1w0).unwrap();
+        fs::write(test_dir.clone() + "/1W0", encoded1w0).unwrap();
+        let vec1w1: Vec<PassMsg> = vec![v1[0]];
+        let encoded1w1 = bincode::serialize(&vec1w1).unwrap();
+        fs::write(test_dir.clone() + "/1W1", encoded1w1).unwrap();
+        let encoded1w2 = bincode::serialize(&v2[0..2]).unwrap();
+        fs::write(test_dir.clone() + "/1W2", encoded1w2).unwrap();
 
-        // oops, we forgot to dump vector 2
+        // oops, we forgot to write snapshot 2
 
-        let vec3 = &v[4..6].to_vec();
-        let encoded3 = bincode::serialize(&vec3).unwrap();
-        fs::write(test_dir.to_owned() + "/3", encoded3).unwrap();
+        let vec3w0 = &v0[4..6].to_vec();
+        let encoded3w0 = bincode::serialize(&vec3w0).unwrap();
+        fs::write(test_dir.clone() + "/3W0", encoded3w0).unwrap();
+        let vec3w1 = &v1[3..6].to_vec();
+        let encoded3w1 = bincode::serialize(&vec3w1).unwrap();
+        fs::write(test_dir.clone() + "/3W1", encoded3w1).unwrap();
+        let vec3w2 = &v2[4..6].to_vec();
+        let encoded3w2 = bincode::serialize(&vec3w2).unwrap();
+        fs::write(test_dir.clone() + "/3W2", encoded3w2).unwrap();
 
         // throw in a bogus file for grins
         fs::write(test_dir.clone() + "/foo", "foo").unwrap();
 
         assert_eq!(
             aggregate_snapshots_from_directory(test_dir).unwrap_err(),
-            "Missing snapshot numbers [2]"
+            "missing snapshot numbers [2] and (snapshot, worker) pairs []"
+        );
+    }
+
+    #[test]
+    fn test_aggregate_snapshots_from_directory_missing_worker() {
+        let test_dir =
+            TEMP_DIR.to_owned() + "test_aggregate_snapshots_from_directory_missing_worker";
+        let _cleanup = TestCleanup::new(test_dir.clone());
+        let mut v0: Vec<PassMsg> = Vec::new();
+        let mut v1: Vec<PassMsg> = Vec::new();
+        let mut v2: Vec<PassMsg> = Vec::new();
+        let mut frequencies0 = ALL_A_FREQUENCIES;
+        let mut frequencies1 = ALL_A_FREQUENCIES;
+        let mut frequencies2 = ALL_A_FREQUENCIES;
+        for i in 0..6 {
+            v0.push((LetterCombination::new(frequencies0), i));
+            v1.push((LetterCombination::new(frequencies1), i));
+            v2.push((LetterCombination::new(frequencies2), i));
+            frequencies0[0] -= 1;
+            frequencies0[1] += 1;
+            frequencies1[0] -= 1;
+            frequencies1[1] += 1;
+            frequencies2[0] -= 1;
+            frequencies2[2] += 1;
+        }
+
+        // dump vectors in heterogeneous pieces
+        create_dir(test_dir.clone()).unwrap();
+
+        let vec1w0: Vec<PassMsg> = vec![v0[0]];
+        let encoded1w0 = bincode::serialize(&vec1w0).unwrap();
+        fs::write(test_dir.clone() + "/1W0", encoded1w0).unwrap();
+        // oops - what happened to worker 1 here??
+        let encoded1w2 = bincode::serialize(&v2[0..2]).unwrap();
+        fs::write(test_dir.clone() + "/1W2", encoded1w2).unwrap();
+
+        let vec2w0 = &v0[1..4].to_vec();
+        let encoded2w0 = bincode::serialize(&vec2w0).unwrap();
+        fs::write(test_dir.clone() + "/2W0", encoded2w0).unwrap();
+        let vec2w1 = &v1[1..3].to_vec();
+        let encoded2w1 = bincode::serialize(&vec2w1).unwrap();
+        fs::write(test_dir.clone() + "/2W1", encoded2w1).unwrap();
+        let vec2w2 = &v2[2..4].to_vec();
+        let encoded2w2 = bincode::serialize(&vec2w2).unwrap();
+        fs::write(test_dir.clone() + "/2W2", encoded2w2).unwrap();
+
+        let vec3w0 = &v0[4..6].to_vec();
+        let encoded3w0 = bincode::serialize(&vec3w0).unwrap();
+        fs::write(test_dir.clone() + "/3W0", encoded3w0).unwrap();
+        let vec3w1 = &v1[3..6].to_vec();
+        let encoded3w1 = bincode::serialize(&vec3w1).unwrap();
+        fs::write(test_dir.clone() + "/3W1", encoded3w1).unwrap();
+        let vec3w2 = &v2[4..6].to_vec();
+        let encoded3w2 = bincode::serialize(&vec3w2).unwrap();
+        fs::write(test_dir.clone() + "/3W2", encoded3w2).unwrap();
+
+        // throw in a bogus file for grins
+        fs::write(test_dir.clone() + "/foo", "foo").unwrap();
+
+        assert_eq!(
+            aggregate_snapshots_from_directory(test_dir).unwrap_err(),
+            "missing snapshot numbers [] and (snapshot, worker) pairs [(1, 1)]"
+        );
+    }
+
+    #[test]
+    fn test_aggregate_snapshots_from_directory_missing_snapshot_and_worker() {
+        let test_dir = TEMP_DIR.to_owned()
+            + "test_aggregate_snapshots_from_directory_missing_snapshot_and_worker";
+        let _cleanup = TestCleanup::new(test_dir.clone());
+        let mut v0: Vec<PassMsg> = Vec::new();
+        let mut v1: Vec<PassMsg> = Vec::new();
+        let mut v2: Vec<PassMsg> = Vec::new();
+        let mut frequencies0 = ALL_A_FREQUENCIES;
+        let mut frequencies1 = ALL_A_FREQUENCIES;
+        let mut frequencies2 = ALL_A_FREQUENCIES;
+        for i in 0..6 {
+            v0.push((LetterCombination::new(frequencies0), i));
+            v1.push((LetterCombination::new(frequencies1), i));
+            v2.push((LetterCombination::new(frequencies2), i));
+            frequencies0[0] -= 1;
+            frequencies0[1] += 1;
+            frequencies1[0] -= 1;
+            frequencies1[1] += 1;
+            frequencies2[0] -= 1;
+            frequencies2[2] += 1;
+        }
+
+        // dump vectors in heterogeneous pieces
+        create_dir(test_dir.clone()).unwrap();
+
+        let vec1w0: Vec<PassMsg> = vec![v0[0]];
+        let encoded1w0 = bincode::serialize(&vec1w0).unwrap();
+        fs::write(test_dir.clone() + "/1W0", encoded1w0).unwrap();
+        // oops - what happened to worker 1 here??
+        let encoded1w2 = bincode::serialize(&v2[0..2]).unwrap();
+        fs::write(test_dir.clone() + "/1W2", encoded1w2).unwrap();
+
+        // oops - what happened to snapshot 2?
+
+        let vec3w0 = &v0[4..6].to_vec();
+        let encoded3w0 = bincode::serialize(&vec3w0).unwrap();
+        fs::write(test_dir.clone() + "/3W0", encoded3w0).unwrap();
+        let vec3w1 = &v1[3..6].to_vec();
+        let encoded3w1 = bincode::serialize(&vec3w1).unwrap();
+        fs::write(test_dir.clone() + "/3W1", encoded3w1).unwrap();
+        let vec3w2 = &v2[4..6].to_vec();
+        let encoded3w2 = bincode::serialize(&vec3w2).unwrap();
+        fs::write(test_dir.clone() + "/3W2", encoded3w2).unwrap();
+
+        // throw in a bogus file for grins
+        fs::write(test_dir.clone() + "/foo", "foo").unwrap();
+
+        assert_eq!(
+            aggregate_snapshots_from_directory(test_dir).unwrap_err(),
+            "missing snapshot numbers [2] and (snapshot, worker) pairs [(1, 1)]"
         );
     }
 
@@ -265,15 +524,15 @@ mod tests {
 
         let vec1: Vec<PassMsg> = vec![v[0]];
         let encoded1 = bincode::serialize(&vec1).unwrap();
-        fs::write(test_dir.clone() + "/1", encoded1).unwrap();
+        fs::write(test_dir.clone() + "/1W0", encoded1).unwrap();
 
         // oops, we dumped garbage
         let encoded2 = "foo!";
-        fs::write(test_dir.clone() + "/2", encoded2).unwrap();
+        fs::write(test_dir.clone() + "/2W0", encoded2).unwrap();
 
         let vec3 = &v[4..6].to_vec();
         let encoded3 = bincode::serialize(&vec3).unwrap();
-        fs::write(test_dir.clone() + "/3", encoded3).unwrap();
+        fs::write(test_dir.clone() + "/3W0", encoded3).unwrap();
 
         // throw in a bogus file for grins
         fs::write(test_dir.clone() + "/foo", "foo").unwrap();
