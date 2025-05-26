@@ -298,9 +298,10 @@ mod tests {
         // this test strategy is not deterministic, but what is with multithreading...
 
         let num_workers = std::thread::available_parallelism().unwrap().get();
-        const COMBINATION_COUNT: u64 = 20_000_000;
+        // n.b. this is going to be especially machine-dependent / non-deterministic, but isn't (mostly) everything
+        // in terms of multithreading?
+        const COMBINATION_COUNT: u64 = 30_000_000;
         const TARGET_A_COUNT: u32 = 10;
-        const SNAPSHOT_FREQUENCY_SECS: u64 = 30;
 
         let dummy_vec = Vec::new();
         let unused_fake_combination_generator = FakeLetterCombinationGenerator::new(
@@ -321,37 +322,36 @@ mod tests {
             terminator.clone(),
         );
 
-        // spawn a thread in the background to set terminator to true in say 10 seconds
-        const TERMINATOR_SET_DELAY_SECS: u64 = 45;
+        // spawn a thread in the background to set terminator to true before any snapshots have been taken
         {
             let terminator = terminator.clone();
-            thread::spawn(move || set_terminator_in_secs(terminator, &TERMINATOR_SET_DELAY_SECS));
+            thread::spawn(move || set_terminator_in_secs(terminator, &45));
         }
 
         let fake_combination_generator_closure =
             |lc: LetterCombination| FakeLetterCombinationGenerator::new(lc, COMBINATION_COUNT);
-        let snapshot_path_1 = fcs.evaluate_combinations(
-            SNAPSHOT_FREQUENCY_SECS,
-            None,
-            fake_combination_generator_closure,
-        );
+        let snapshot_path_1 =
+            fcs.evaluate_combinations(600, None, fake_combination_generator_closure);
         let _test_cleanup = TestCleanup::new(&snapshot_path_1);
 
-        let (max_snapshot_num_1, progress_info) =
+        let (max_snapshot_num_1, progress_info_1) =
             read_next_progress_information_from_directory(&snapshot_path_1).unwrap();
         println!(
-            "read the last snapshot (num {}) from snapshot directory",
+            "portion 1 - read the last snapshot (num {}) from snapshot directory",
             max_snapshot_num_1
         );
-        println!("evaluated_count {}", *progress_info.get_evaluated_count());
+        println!("evaluated_count {}", *progress_info_1.get_evaluated_count());
         let remaining_combination_count_1 =
-            COMBINATION_COUNT - *progress_info.get_evaluated_count();
+            COMBINATION_COUNT - *progress_info_1.get_evaluated_count();
         assert!(
             remaining_combination_count_1 != 0,
             "all combinations were evaluated in the first search"
         );
         // verify that the termination actually happened (as opposed to some other weird edge case that should've paniced)
-        assert!(!*terminator.lock().unwrap(), "termination was unsuccessful");
+        assert!(
+            !*terminator.lock().unwrap(),
+            "termination was unsuccessful for search 1"
+        );
 
         // second part of search
         let fcs2 = CombinationSearch::new(
@@ -366,26 +366,38 @@ mod tests {
         let fake_combination_generator_2 = |lc: LetterCombination| {
             FakeLetterCombinationGenerator::new(lc, remaining_combination_count_1)
         };
+
+        // spawn a thread in the background to set terminator to true after a snapshot has been taken normally
+        {
+            let terminator = terminator.clone();
+            thread::spawn(move || set_terminator_in_secs(terminator, &80));
+        }
+
         let snapshot_path_2 = fcs2.evaluate_combinations(
-            SNAPSHOT_FREQUENCY_SECS,
-            Some(progress_info.clone()),
+            60,
+            Some(progress_info_1.clone()),
             fake_combination_generator_2,
         );
 
         // resuming from a snapshot should write to the same directory
         assert_eq!(snapshot_path_1, snapshot_path_2);
-
-        // stop it a second time and run it again
+        let (max_snapshot_num_2, progress_info_2) =
+            read_next_progress_information_from_directory(&snapshot_path_2).unwrap();
+        println!(
+            "portion 2 - read the last snapshot (num {}) from snapshot directory",
+            max_snapshot_num_2
+        );
+        println!("evaluated_count {}", *progress_info_2.get_evaluated_count());
         let remaining_combination_count_2 =
-            COMBINATION_COUNT - *progress_info.get_evaluated_count();
+            COMBINATION_COUNT - *progress_info_2.get_evaluated_count();
         assert!(
             remaining_combination_count_2 != 0,
-            "all combinations were evaluated in the first search"
+            "all combinations were evaluated in the second search"
         );
         // verify that the termination actually happened (as opposed to some other weird edge case that should've paniced)
         assert!(!*terminator.lock().unwrap(), "termination was unsuccessful");
 
-        // second part of search
+        // final part of search
         let fcs3 = CombinationSearch::new(
             &dummy_vec,
             count_letter_a_batch,
@@ -398,15 +410,17 @@ mod tests {
         let fake_combination_generator_3 = |lc: LetterCombination| {
             FakeLetterCombinationGenerator::new(lc, remaining_combination_count_2)
         };
-        let snapshot_path_3 = fcs3.evaluate_combinations(
-            SNAPSHOT_FREQUENCY_SECS,
-            Some(progress_info),
-            fake_combination_generator_3,
-        );
+        let snapshot_path_3 =
+            fcs3.evaluate_combinations(30, Some(progress_info_2), fake_combination_generator_3);
 
         // resuming from a snapshot should write to the same directory
         assert_eq!(snapshot_path_2, snapshot_path_3);
+        // we should have generated all combinations here
+        let (_, progress_info_3) =
+            read_next_progress_information_from_directory(&snapshot_path_3).unwrap();
+        assert_eq!(progress_info_3.get_evaluated_count(), &COMBINATION_COUNT);
 
+        // verify that the expected and actual contents are as expected
         let expected: HashMap<PassMsg, usize> = unused_fake_combination_generator
             .filter_map(|x| {
                 let actual_count = count_letter_a(&x);

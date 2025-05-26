@@ -166,7 +166,8 @@ pub fn evaluate_combinations(
                         // stop here with the last thread stopping in the "normal" snapshot case)
                         *num_active_workers.lock().expect("snapshot or worker thread paniced while holding num_active_workers mutex") -= 1;
                         *running_worker_count -= 1;
-                        if *running_worker_count == 1 {
+			// the last worker to stop notifies the snapshot thread
+                        if *running_worker_count == 0 {
                             notify_snapshot_thread_all_workers_stopped(&workers_stopped);
                         }
 
@@ -182,7 +183,7 @@ pub fn evaluate_combinations(
 
                     // check invariant (local queue empty at thread termination)
                     if !local.is_empty() {
-                        panic!("local queue on worker thread {} was not empty ({} combination(s)) at end of snapshot.",
+                        panic!("local queue on worker thread {} was not empty ({} combination(s)) at termination.",
 			       thread::current().name().unwrap_or("unnamed"), local.len())
                     }
 
@@ -196,15 +197,8 @@ pub fn evaluate_combinations(
 
                 // there's stuff remaining, but the queues are dry - check if we should dump for a snapshot
                 if stop_for_snapshot.load(MemoryOrdering::SeqCst) {
-                    let mut can_stop_for_snapshot = false;
-                    {
-                        let generator_stopped = generator_thread_stopped.read().expect("generator or snapshot thread paniced while holding generator_stopped mutex");
-                        if *generator_stopped {
-                            can_stop_for_snapshot = true;
-                        }
-                    }
-
-                    if can_stop_for_snapshot {
+                    // workers can only stop for a snaphot after the generator is stopped
+                    if *generator_thread_stopped.read().expect("generator or snapshot thread paniced while holding generator_stopped mutex") {
                         // process anything that's in the current batch
                         evaluate_batch(
                             metric,
@@ -217,12 +211,13 @@ pub fn evaluate_combinations(
                         batch_count = 0;
 
                         // move the local passed vector to the shared vector
+                        let passed_count = passed_local.len();
                         *pass_vector.lock().unwrap_or_else(|_| panic!("snapshot thread paniced while holding pass_vector mutex for worker thread {}", thread::current().name().unwrap_or("unnamed"))) = Some(passed_local);
                         passed_local = Vec::new();
 
                         // check snapshot invariant (queues empty)
                         if !local.is_empty() {
-                            panic!("local queue on worker thread {} was not empty ({} combination(s)) at end of snapshot.",
+                            panic!("local queue on worker thread {} was not empty ({} combination(s)) when stopping for snapshot.",
 			    thread::current().name().unwrap_or("unnamed"), local.len())
                         }
 
