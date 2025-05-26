@@ -46,17 +46,17 @@ fn main() {
     // grid from https://www.youtube.com/watch?v=3cgr_GgA5ns
     let (trie, trie_word_count) = create_trie(word_list_filepath);
     assert_eq!(trie_word_count, word_vector_word_count);
-    let test_board_chars = [
+    let target_board_chars = [
         'M', 'H', 'O', 'N', 'I', 'T', 'E', 'R', 'L', 'A', 'S', 'N', 'S', 'E', 'R', 'U',
     ];
-    let test_board_letters: [Letter; TILE_COUNT] = test_board_chars
+    let target_board_letters: [Letter; TILE_COUNT] = target_board_chars
         .into_iter()
         .filter_map(|c| translate_letter(&c))
         .collect::<Vec<Letter>>()
         .try_into()
         .unwrap();
-    let mut test_board = Board::new(test_board_letters, &trie);
-    assert_eq!(test_board.maximum_score(), &TARGET_SCORE);
+    let mut target_board = Board::new(target_board_letters, &trie);
+    assert_eq!(target_board.maximum_score(), &TARGET_SCORE);
 
     // set up early termination infrastructure
     let combination_terminator: Arc<Mutex<bool>> = Arc::new(Mutex::new(false));
@@ -78,7 +78,7 @@ fn main() {
     );
 
     const SECS_PER_HOUR: u64 = 3600;
-    const SNAPSHOT_FREQUENCY: u64 = 12 * SECS_PER_HOUR;
+    const SNAPSHOT_FREQUENCY: u64 = 4 * SECS_PER_HOUR;
 
     let combination_generator_creator = SequentialLetterCombinationGenerator::new;
     combination_evaluator.evaluate_combinations(
