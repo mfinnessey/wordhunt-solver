@@ -4,6 +4,7 @@
 # editor backups
 *~
 
+# wordlists
 wordlist*
 
 # convenience scripts
@@ -11,3 +12,7 @@ wordlist*
 
 # progress snapshots
 snapshots*
+
+# result data
+stage1search1compressed
+log*.txt
